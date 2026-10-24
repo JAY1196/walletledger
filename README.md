@@ -320,7 +320,7 @@ Both benchmarks ran on one laptop, with the application, k6 and MySQL sharing th
 
 The hot-pair scenario concentrates traffic on two wallets and exercises contention. The wallet-pool scenario distributes work over more wallets and increases virtual users over time.
 
-**Benchmark caveat:** Both k6 processes exited with code 0. The saved JSON threshold flags are false, and a diagnostic confirmed that false represents a passing threshold in this k6 summary format. However, other fields in the saved summaries were recorded as internally inconsistent in the validation notes. The threshold interpretation is clarified, but the summaries have not been fully reconciled or independently validated. These are local development measurements, not production capacity guarantees.
+**Benchmark interpretation:** Both k6 processes exited with code 0. In this k6 summary format, the saved threshold flag `false` indicates that the threshold passed, as confirmed by a diagnostic using an intentionally impossible threshold. The reported HTTP failure rate was 0%, unexpected response counts were zero, and p95 latency was below 500 ms in both runs. These are local development measurements, not production capacity guarantees.
 
 ## Security and operational limitations
 
@@ -347,4 +347,4 @@ The hot-pair scenario concentrates traffic on two wallets and exercises contenti
 
 WalletLedger's current implemented scope is a transactional wallet backend with idempotent money movement, ledger/audit/outbox integration, bounded deadlock retry, and concurrency/integrity tests. The current verified test baseline is 97 passing tests.
 
-The repository is published on GitHub for review and demonstration. The implemented scope, verification evidence, and known limitations are documented above. Benchmark results are local observations; the k6 threshold-reporting discrepancy remains unresolved.
+The repository is published on GitHub for review and demonstration. The implemented scope, verification evidence, and known limitations are documented above. Benchmark results are local observations and do not establish production capacity.

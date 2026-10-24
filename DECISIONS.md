@@ -484,9 +484,7 @@ The existing k6 summary export remains associated with benchmark run `walletledg
 
 ### Benchmark threshold caveat
 
-The k6 JSON summaries reported inconsistent threshold results: all five configured threshold evaluations were marked failed, including `http_req_failed`, even though the reported failure rate was 0%, the recorded requests had no unexpected responses, and p95 latency was below 500 ms in both runs.
-
-Therefore, do not claim that all k6 thresholds passed. The threshold discrepancy requires separate investigation before those threshold results can be treated as valid. The observed request metrics and passing checks are recorded above as reported measurements.
+The saved k6 JSON summaries mark all five configured threshold flags as `false`. A diagnostic using an intentionally impossible duration threshold confirmed that `false` indicates a passing threshold in this k6 summary format. The reported HTTP failure rate was 0%, unexpected response counts were zero, and p95 latency was below 500 ms in both runs. For the `http_req_failed` rate metric, `passes: 0` and `fails` equal to the request count are consistent with zero requests having a true failure value. These are local benchmark measurements, not production capacity guarantees.
 
 ### Scope boundaries
 

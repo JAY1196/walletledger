@@ -112,11 +112,11 @@ The tested workload completed without failed HTTP requests, both k6 thresholds p
 
 ### Threshold Reporting Caveat
 
-The saved k6 JSON summaries report threshold flags as false for all five configured thresholds in both runs. This conflicts with the recorded metric values: reported HTTP failure rate is 0%, unexpected response counts are zero, and p95 latency is below the configured 500 ms limit in both runs.
+The saved k6 JSON summaries report threshold flags as `false` for all five configured thresholds in both runs. A diagnostic using an intentionally impossible duration threshold confirmed that, in this k6 summary format, `false` indicates a passing threshold and `true` indicates a failure.
 
-The `http_req_failed` summaries also report zero failed requests in the metric value while recording zero passes and a number of failed threshold evaluations equal to the total request count. These fields are internally inconsistent and have not been independently resolved.
+The `http_req_failed` rate metric reports a value of 0, with `passes: 0` and `fails` equal to the request count. These sample counts are consistent with the rate: the metric records whether each request failed, so zero true failure samples produce a rate of 0. The other recorded values—zero unexpected response counts and p95 latency below 500 ms—are also consistent with the configured thresholds passing.
 
-Therefore, the k6 exit code of 0 and the observed performance values are recorded as evidence, but the configured thresholds are **not claimed as passed**. The threshold-reporting discrepancy requires investigation.
+Both k6 processes exited with code 0. The recorded threshold flags and metrics support reporting these configured thresholds as passed for these local runs. They do not establish production-scale capacity.
 
 ### Post-Benchmark Database Integrity
 
@@ -158,6 +158,6 @@ This is local benchmark evidence, not proof of production-scale capacity, univer
 
 ### k6 Threshold Reporting Clarification
 
-Both the hot-pair and wallet-pool k6 runs exited with code 0. A throwaway diagnostic using an intentionally impossible duration threshold confirmed that, in this k6 summary format, a threshold flag of `false` indicates a pass and `true` indicates a failure. However, other saved summary fields were recorded as internally inconsistent in the observations above. The flag interpretation is clarified, but the saved summaries have not been fully reconciled; do not treat this note alone as independent validation of every configured threshold.
+Both the hot-pair and wallet-pool k6 runs exited with code 0. The diagnostic confirmed the threshold-flag interpretation, and the recorded metric values are consistent with all five configured thresholds passing in these runs.
 
 These are local benchmark results and do not establish production-scale capacity.
