@@ -347,4 +347,4 @@ The hot-pair scenario concentrates traffic on two wallets and exercises contenti
 
 WalletLedger's current implemented scope is a transactional wallet backend with idempotent money movement, ledger/audit/outbox integration, bounded deadlock retry, and concurrency/integrity tests. The current verified test baseline is 97 passing tests.
 
-The project is being prepared for sharing and demonstration. GitHub upload is intentionally deferred until the remaining wrap-up and verification tasks are complete.
+The repository is published on GitHub for review and demonstration. The implemented scope, verification evidence, and known limitations are documented above. Benchmark results are local observations; the k6 threshold-reporting discrepancy remains unresolved.
