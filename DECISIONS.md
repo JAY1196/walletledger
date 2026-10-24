@@ -1,7 +1,7 @@
-﻿# WalletLedger - Architecture Decisions
+# WalletLedger - Architecture Decisions
 
-Last updated: 2026-10-18
-Scope: Architecture decisions and verified implementation status through the transfer/idempotency milestone
+Last updated: 2026-10-24
+Scope: Architecture decisions, verified implementation status, concurrency tests, and local benchmark evidence through Module 4C
 
 ## 1. Java and Spring Boot
 
@@ -131,18 +131,21 @@ administrator can still change the schema or data.
 
 ## 10. Transactions and concurrency
 
-**Decision:** Configure READ COMMITTED and use explicit ordered
-pessimistic row locking for money movement.
+**Decision:** Configure READ COMMITTED and use explicit ordered pessimistic row locking for money movement.
 
-**Why:** MySQL defaults to REPEATABLE READ, which can introduce additional
-gap-lock behavior. READ COMMITTED is selected to reduce unnecessary
-locking surprises; it does not eliminate all deadlocks.
+**Why:** MySQL defaults to REPEATABLE READ, which can introduce additional gap-lock behavior. READ COMMITTED is selected to reduce unnecessary locking surprises; it does not eliminate all deadlocks.
 
-Implementation rule for the money-movement module: acquire wallet locks
-in one consistent order, comparing the canonical 16 UUID bytes
-lexicographically as unsigned bytes. Use one comparator everywhere.
+**Canonical lock-order rule:** Acquire wallet locks in one consistent order, comparing the canonical 16 UUID bytes lexicographically as unsigned bytes. Use one comparator everywhere.
 
-Implementation status (2026-10-18): money movement is implemented and integration-tested. Wallet rows are locked in UUID order by the repository query. The canonical unsigned-byte comparator described above is the intended architecture rule; verify the implementation uses that exact comparator consistently before treating this detail as fully confirmed.
+**Verified implementation evidence:**
+
+- `WalletLockOrder` implements unsigned UUID comparison.
+- The lock-order utility is used by `LedgerPostingService`, `TransferService`, and `WalletMoneyMovementService`.
+- A parity test verifies the relevant ordering behavior.
+- Concurrent wallet creation and same-email registration races are covered by tests.
+- The 2,000-transfer opposite-direction stress test and controlled real-MySQL error 1213 recovery test are implemented and verified.
+
+**Boundary:** These tests establish the recorded local behavior, not production capacity or production readiness.
 
 ## 11. Idempotency and reversals
 
@@ -229,73 +232,32 @@ Verified on 2026-10-12 (historical Module 1 baseline):
 - Swagger's X-User-Id authorization scheme was verified.
 - HTTP 401, 400, and 500 error formats were verified.
 - Actuator overall health, liveness, and readiness returned UP.
-- Automated Maven suite: 9 tests passed, with zero failures and zero errors.
+- Historical Module 1 checkpoint: automated Maven suite passed 9 tests, with zero failures and zero errors.
 
-## 17. Deliberately deferred from Module 1
+## 17. Deferred scope and current status
 
-The following were not implemented in Module 1. This is a historical scope record, not a statement that each item remains unimplemented today:
 
-- User and wallet business APIs (implemented in the subsequent users/wallets milestone).
-- Money movement and concurrency-safe transfers (implemented and integration-tested by 2026-10-18).
-- Idempotency response-replay service logic (implemented and integration-tested for retries and request mismatch by 2026-10-18).
-- Reversal service logic (status not confirmed by the verification recorded here; database reversal constraints are tested).
-- Redis rate limiter (deferred; see Section 13).
-- Kafka publisher (deferred; see Section 12).
-- JWT authentication (deferred; see Section 14).
-- Fraud detection (explicitly deferred; do not implement in the current scope).
-- Performance benchmarks (not confirmed as completed).
+This section records scope boundaries; it is not a claim that every item was completed in Module 1.
 
-These belong to subsequent modules and must not be represented as
-completed features on the CV.
-## Module 2 - Users and Wallets
+- **Verified:** Wallet transfers, idempotency, ledger posting, transaction audit, transactional outbox writes, invariant checks, and bounded MySQL deadlock retry.
+- **Verified:** Lock ordering through `WalletLockOrder`, its production call sites, and the parity test.
+- **Verified:** Concurrent wallet creation and same-email registration race tests.
+- **Verified:** The 2,000 opposite-direction transfer stress test and local k6 benchmark scenarios.
+- **Not implemented:** Transaction reversals and customer statement APIs.
+- **Open:** Authentication and authorization hardening, outbox publishing, rate limiting, and production deployment controls.
+- **Deferred by scope:** Fraud detection; retain the outbox for possible future integration, but do not implement fraud features in this project phase.
 
-### 1. User Registration
-- Users register through `POST /api/v1/users`.
-- Registration is public and does not require the `X-User-Id` header.
-- Names are trimmed, and email addresses are trimmed and normalized to lowercase.
-- User IDs are generated as UUIDs in the application.
-- Email uniqueness is enforced by the database using `uq_users_email`.
-- Duplicate email registration returns `409 CONFLICT`.
-- The API returns the database-generated creation timestamp.
+### Historical Module 2 implementation record
 
-### 2. Wallet Creation
-- Users create wallets through `POST /api/v1/wallets`.
-- Each user can have only one wallet per currency.
-- Wallets are created with currency `INR` and an initial balance of zero.
-- Wallet IDs are generated as UUIDs in the application.
-- The database constraint `uq_wallets_user_currency` enforces wallet uniqueness.
-- Wallet creation does not perform money transfers or modify another wallet.
+These details preserve the original users-and-wallets milestone. They are historical implementation notes, not a replacement for the current verification status.
 
-### 3. Balance Representation
-- Wallet balances are stored as `BIGINT` values in paise.
-- API responses expose the amount through `balancePaise`.
-- Integer paise avoids floating-point arithmetic for monetary amounts.
-
-### 4. Wallet Ownership and Access
-- `GET /api/v1/wallets/{id}/balance` returns a wallet balance only to its owner.
-- A wallet not owned by the caller returns `404 NOT_FOUND`, avoiding disclosure of another user's wallet.
-- Protected `/api/**` endpoints require a valid `X-User-Id` UUID.
-- `X-User-Id` is a development-only identity mechanism, not production authentication.
-
-### 5. API Error Handling
-- Invalid request data returns `400 BAD_REQUEST`.
-- Missing identity headers return `401 UNAUTHENTICATED` on protected endpoints.
-- Duplicate email or wallet creation returns `409 CONFLICT`.
-- Unexpected errors are handled by the global exception handler.
-
-### 6. Database and Testing
-- Existing Flyway migrations V1 and V2 remain unchanged.
-- Automated integration tests cover user registration, duplicate email handling, wallet creation, duplicate wallet prevention, balance retrieval, and ownership enforcement.
-- Historical verification: the 15 October 2026 full Maven run passed 18 tests.
-- Latest full verification on 18 October 2026: `mvnw.cmd clean verify` passed 46 tests with zero failures, zero errors, and zero skipped tests. The executable Spring Boot JAR was generated.
-- A focused idempotency mismatch test passed: reusing a key with a different amount returns `409 CONFLICT` and does not move money a second time.
-- Concurrent wallet-creation error handling has not been explicitly confirmed by the test evidence recorded here; retain it as a verification item.
-
-### 7. Scope Boundaries
-- The original Module 2 scope was user registration, wallet creation, and owner-scoped balance retrieval.
-- Transfer processing and idempotency are now implemented in the subsequent development work and have passing integration tests; they should not be described as still unimplemented.
-- Reversal service behavior, Redis rate limiting, Kafka publishing, JWT authentication, fraud detection, and performance benchmarking should be treated as deferred or unverified unless a later section records completion.
-
+- **Registration:** `POST /api/v1/users` is public. Names are trimmed; emails are trimmed and normalized to lowercase. Application-generated UUIDs identify users, while database constraint `uq_users_email` enforces email uniqueness. Duplicate emails return `409 CONFLICT`; the creation timestamp is database-generated.
+- **Wallet creation:** `POST /api/v1/wallets` creates an INR wallet with a zero initial balance. Application-generated UUIDs identify wallets, and `uq_wallets_user_currency` enforces one wallet per user and currency. Creating a wallet does not move money.
+- **Money representation:** Wallet balances are stored as `BIGINT` paise and exposed through `balancePaise`, avoiding floating-point monetary arithmetic.
+- **Ownership:** `GET /api/v1/wallets/{id}/balance` is owner-scoped. A wallet not owned by the caller returns `404 NOT_FOUND`. Protected `/api/**` endpoints require a valid `X-User-Id` UUID; this is a development identity mechanism, not production authentication.
+- **Errors:** Invalid request data returns `400 BAD_REQUEST`; missing identity on protected endpoints returns `401 UNAUTHENTICATED`; duplicate email or wallet creation returns `409 CONFLICT`. Unexpected errors are handled by the global exception handler.
+- **Schema and tests:** Flyway V1/V2 were retained unchanged. The historical full-suite checkpoints were 18 passing tests on 15 October 2026 and 46 passing tests on 18 October 2026. A focused idempotency-mismatch test confirmed that reusing a key with a different amount returns `409 CONFLICT` without moving money a second time.
+- **Concurrency follow-up:** The original Module 2 notes had not yet confirmed concurrent wallet-creation handling. Later project verification recorded concurrent wallet-creation and same-email registration race tests; see the current verification sections below.
 
 ## 18. Verified transfer and idempotency status (2026-10-18)
 
@@ -310,45 +272,58 @@ The following behaviors have passing integration-test evidence as of 2026-10-18:
 - Concurrent retries with the same key/request are tested to transfer only once.
 - Simultaneous transfers are tested against overspending; the verified scenario allows only one competing transfer to succeed.
 - Balance overflow failure is tested to roll back wallet balance changes, transaction creation, and ledger entries.
-- Latest full suite: 46 tests, 0 failures, 0 errors, 0 skipped; `BUILD SUCCESS`; packaged artifact: `target/walletledger-0.0.1-SNAPSHOT.jar`.
+- Historical full-suite checkpoint (2026-10-18): 46 tests, 0 failures, 0 errors, 0 skipped; `BUILD SUCCESS`; packaged artifact: `target/walletledger-0.0.1-SNAPSHOT.jar`.
 
 These test results establish the behaviors covered by the current suite; they do not by themselves establish production readiness, authentication security, load capacity, or completion of deferred modules.
 
-## 19. Open verification items and guardrails
+## 19. Open items and scope guardrails
 
-- Explicitly verify concurrent wallet creation returns a stable `409 CONFLICT` for the losing request.
-- Confirm the transfer lock ordering exactly matches the canonical unsigned lexicographic UUID-byte rule in Section 10.
-- Keep `X-User-Id` limited to local development/testing; replace it with verified JWT or another proper authentication mechanism before production.
-- Do not edit already-applied Flyway V1/V2 migrations to change existing schema. Use a new versioned migration for future schema changes.
-- Preserve the existing development database and Docker volumes during normal development and verification.
-- Do not implement fraud detection in the current scope. Keep the outbox schema available for a later publisher/integration module.
+The following are **Open**; they are not represented as completed:
 
-## 20. Verified Module 3 - Ledger Posting and Transaction Integrity (2026-10-19)
+- **Open:** Replace development identity handling with authenticated identity and enforce authorization.
+- **Open:** Implement and operate the transactional outbox publisher.
+- **Open:** Add API rate limiting, production monitoring, and deployment controls.
+- **Open:** Rerun k6 scenarios against the packaged Docker application in a dedicated environment.
+- **Not implemented:** Transaction reversal and customer statement APIs.
+- **Deferred:** Fraud detection remains out of scope. Do not build fraud features as part of this work.
 
-### Implemented and verified
+**Migration safeguard:** Do not edit already-applied Flyway V1/V2 migrations to change the existing schema. Use a new versioned migration for future schema changes.
 
-- `LedgerPostingService` performs balanced, atomic ledger posting within an existing database transaction.
-- Posting validates the number of legs, debit/credit totals, duplicate wallet-direction pairs, sufficient funds, and balance overflow before applying changes.
-- Wallet rows are locked in a consistent UUID-string order during posting and transfers.
+**Data safeguard:** Preserve the existing development database and Docker volumes during normal development and verification. Do not remove volumes unless intentionally performing a destructive reset.
+
+The existing tests and local benchmarks do not establish production readiness.
+
+## 20. Verified ledger posting and transaction integrity
+
+### Posting validation and rollback evidence
+
+- `LedgerPostingService` performs balanced, atomic ledger posting inside the existing database transaction.
+- Posting validates the number of ledger legs, debit/credit totals, duplicate wallet-direction pairs, sufficient funds, and balance overflow before applying balance changes.
 - Transaction lifecycle rules prevent invalid state transitions.
-- Transfer completion records audit and outbox data within the transaction.
-- Integration tests cover successful transfers, idempotent retries, competing transfers, opposite-direction transfers, insufficient funds, and rollback when posting or outbox processing fails.
-- Database protections reject updates and deletes to append-only ledger and audit records.
-- `LedgerInvariantChecker` detects completed or reversed transactions with missing ledger entries or inconsistent debit, credit, and transaction totals.
-- The latest `mvnw.cmd clean verify` run on 2026-10-19 passed 66 tests with zero failures, zero errors, and zero skipped tests. The executable JAR was packaged successfully.
+- Transfer completion writes transaction audit and outbox records within the same transaction.
+- Integration tests cover successful transfers, idempotent retries, competing and opposite-direction transfers, insufficient funds, and rollback when ledger posting or outbox processing fails.
+- Database protections reject updates and deletes against append-only ledger and audit records.
+- The invariant checker detects integrity problems including completed transactions without the expected ledger entries and inconsistent debit/credit or transaction totals. The later verification also covers cached-wallet-balance reconciliation and the global wallet-balance sum.
 
-### Remaining verification and scope boundaries
+These are implementation and test claims, not a guarantee of production readiness. Reversal posting and reversal APIs remain unimplemented.
 
-- Concurrent wallet creation and concurrent duplicate-email registration still need dedicated concurrency verification.
-- Explicit posting tests for every planned transaction type (TOPUP, WITHDRAWAL, and REVERSAL) are not confirmed by the current test inventory.
-- A separate thousands-of-iterations concurrency stress test has not been confirmed. Existing high-volume integration tests and the recorded k6 benchmark are documented in Section 21.
-- Verify that the implementation's UUID lock ordering matches the canonical unsigned-byte ordering rule in Section 10 before claiming that exact rule is implemented.
-- Kafka publishing, Redis rate limiting, production authentication, and fraud detection remain deferred or unverified.
-- Section 21 records the verified wallet reconciliation checks, global balance invariant checks, and real-MySQL deadlock-retry test.
+The ledger core and money-movement integration have progressed beyond the earlier Module 3 snapshot. The latest recorded test baseline is 97 tests across 21 classes, with zero failures, errors, or skipped tests.
 
-The passing test suite verifies only the behaviors exercised by those tests. The local benchmark and controlled integration tests do not establish production readiness or completion of deferred features.
+Verified behavior includes:
 
-## 21. Verified Wallet Integrity and Concurrency Status (2026-10-23)
+- Double-entry ledger posting with transaction audit and outbox records in the same transaction.
+- Wallet-to-ledger and global wallet-balance integrity checks.
+- Deterministic wallet locking through `WalletLockOrder`, using unsigned UUID comparison in `LedgerPostingService`, `TransferService`, and `WalletMoneyMovementService`.
+- A lock-order parity test, concurrent wallet creation tests, and same-email registration race tests.
+- A 2,000-transfer opposite-direction stress test.
+- A controlled real-MySQL 1213 deadlock test proving bounded retry recovery.
+
+**Not implemented:** Reversal posting and reversal APIs.
+
+## 21. Earlier combined benchmark and integrity run (2026-10-23)
+
+This is an earlier combined run, distinct from the per-scenario runs documented in Section 22. Its recorded 6,173 iterations must not be added to, or substituted for, the Section 22 total of 6,181 iterations.
+
 
 ### Implementation and verification
 
@@ -397,7 +372,7 @@ Recorded results:
 - Completed iterations: 6,173.
 - Interrupted iterations: 0.
 
-The run met the configured HTTP failure-rate and p95 latency thresholds. These measurements represent a local benchmark and do not establish production capacity.
+The original run notes recorded the configured HTTP failure-rate and p95 latency thresholds as met. See Section 22 for the later threshold-format diagnostic. These measurements represent a local benchmark and do not establish production capacity.
 
 ### Post-benchmark SQL integrity verification
 
@@ -427,7 +402,10 @@ The existing k6 summary export remains associated with benchmark run `walletledg
 - The integration test demonstrates real-MySQL-deadlock recovery under controlled test conditions; it does not establish production readiness or production load capacity.
 
 
-## Section 22 — Module 4C: Concurrency Benchmark and Integrity Validation (2026-10-24)
+## Section 22 - Module 4C: Per-scenario concurrency benchmarks and integrity validation (2026-10-24)
+
+These are two separate scenario runs: 1,088 hot-pair iterations plus 5,093 wallet-pool iterations, totalling 6,181. Section 21 records an earlier combined run (6,173 iterations), not a conflicting count for these runs.
+
 
 ### Environment and methodology
 

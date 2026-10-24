@@ -1,5 +1,12 @@
 # WalletLedger
 
+## Highlights
+
+- 97 automated tests across 21 test classes; zero failures, errors, or skipped tests in the recorded run.
+- 2,000 opposite-direction concurrent transfers tested, plus a forced real-MySQL error 1213 deadlock recovery test.
+- Two per-scenario k6 runs completed 6,181 iterations up to 25 VUs, with 0% reported HTTP failures and zero integrity violations afterward.
+- Double-entry ledger postings, transaction audit records, and outbox events are written within the same transaction.
+
 A production-style REST backend for wallet operations, built with Java 21, Spring Boot, and MySQL. The project focuses on correct money movement under retries and concurrency, with an auditable ledger and database integrity checks.
 
 ## What it does
@@ -306,7 +313,7 @@ Both benchmarks ran on one laptop, with the application, k6 and MySQL sharing th
 | Metric | Hot pair | Wallet pool |
 |---|---:|---:|
 | Workload | 2 wallets | 10 wallets |
-| Load pattern | 5 constant VUs, 30 seconds | 5 → 10 → 25 VUs, 100 seconds |
+| Load pattern | 5 constant VUs, 30 seconds | 5 to 10 to 25 VUs, 100 seconds |
 | Transfers | 1,088 | 5,093 |
 | Throughput | 35.75 req/s | 50.88 req/s |
 | p50 latency | 30.4 ms | 47.5 ms |
@@ -339,9 +346,8 @@ The hot-pair scenario concentrates traffic on two wallets and exercises contenti
 2. Implement an outbox publisher with reliable delivery, retries and observability.
 3. Add API rate limiting and operational monitoring.
 4. Design reversals and customer statement APIs.
-5. Investigate the k6 threshold configuration and rerun reproducible benchmark scenarios.
-6. Run load tests on a dedicated environment and document the environment and limits.
-7. Consider fraud detection as a separate future module, consuming published events rather than adding fraud logic to this version.
+5. Rerun the k6 scenarios in a dedicated environment using the packaged Docker application, and document the environment and limits.
+6. Consider fraud detection as a separate future module, consuming published events rather than adding fraud logic to this version.
 
 ## Project status
 
