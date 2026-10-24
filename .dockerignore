@@ -1,0 +1,18 @@
+﻿# Local secrets and environment overrides
+.env
+.env.*
+
+# Build output
+target/
+build/
+
+# IDE and editor state
+.idea/
+.vscode/
+*.iml
+
+# Local backups, logs and review scratch files
+*.bak
+*.log
+*.backup*
+*-review.*

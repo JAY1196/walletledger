@@ -1,0 +1,60 @@
+﻿spring:
+  datasource:
+    url: "jdbc:mysql://mysql:3306/${MYSQL_DATABASE:walletledger}?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&preserveInstants=true&sslMode=DISABLED&allowPublicKeyRetrieval=true"
+    username: "${MYSQL_APP_USER:walletledger_app}"
+    password: "${MYSQL_APP_PASSWORD}"
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      pool-name: WalletLedgerHikari
+      maximum-pool-size: 10
+      minimum-idle: 10
+      connection-timeout: 3000
+      validation-timeout: 1000
+      max-lifetime: 1740000
+      leak-detection-threshold: 20000
+      transaction-isolation: TRANSACTION_READ_COMMITTED
+      connection-init-sql: "SET SESSION time_zone = '+00:00', innodb_lock_wait_timeout = 5"
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    url: "jdbc:mysql://mysql:3306/${MYSQL_DATABASE:walletledger}?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true&preserveInstants=true&sslMode=DISABLED&allowPublicKeyRetrieval=true"
+    user: "${MYSQL_OWNER_USER:walletledger_owner}"
+    password: "${MYSQL_OWNER_PASSWORD}"
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  data:
+    redis:
+      host: redis
+      port: 6379
+      connect-timeout: 2s
+      timeout: 2s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "health,info"
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+      group:
+        liveness:
+          include: "livenessState"
+        readiness:
+          include: "readinessState,db"
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true

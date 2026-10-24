@@ -1,0 +1,11 @@
+spring:
+  application:
+    name: walletledger
+
+  # Load local development variables from .env as Java properties.
+  config:
+    import: "optional:file:.env[.properties]"
+
+  # Use dev only when no profile has been explicitly activated.
+  profiles:
+    default: dev
