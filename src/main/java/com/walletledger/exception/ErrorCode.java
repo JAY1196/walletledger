@@ -9,7 +9,15 @@ public enum ErrorCode {
     FORBIDDEN(HttpStatus.FORBIDDEN, "You are not allowed to perform this action."),
     NOT_FOUND(HttpStatus.NOT_FOUND, "The requested resource was not found."),
     CONFLICT(HttpStatus.CONFLICT, "The request conflicts with the current state."),
-    UNPROCESSABLE_ENTITY(HttpStatus.UNPROCESSABLE_CONTENT, "The request cannot be processed."),
+    ALREADY_REVERSED(
+            HttpStatus.CONFLICT,
+            "This transaction has already been reversed."),
+    UNPROCESSABLE_ENTITY(
+            HttpStatus.UNPROCESSABLE_CONTENT,
+            "The request cannot be processed."),
+    INSUFFICIENT_BALANCE(
+            HttpStatus.UNPROCESSABLE_CONTENT,
+            "Insufficient wallet balance to reverse this transaction."),
     RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "Too many requests."),
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred."),
     SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "The service is temporarily unavailable.");

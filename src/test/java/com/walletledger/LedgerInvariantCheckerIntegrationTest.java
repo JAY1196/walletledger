@@ -95,19 +95,178 @@ class LedgerInvariantCheckerIntegrationTest {
 
     @Test
     @Transactional
-    void balancedReversedTransactionHasNoViolations() {
-        Transaction transaction = createTransaction(
+    void reversedTransactionWithoutLinkedReversalIsDetected() {
+        Transaction original = createTransaction(
                 TransactionStatus.COMPLETED, 100L);
 
-        transaction.markReversed((short) 200, "{}");
-        transactionRepository.saveAndFlush(transaction);
+        addEntry(original, LedgerEntryDirection.DEBIT, 100L);
+        addEntry(original, LedgerEntryDirection.CREDIT, 100L);
 
-        addEntry(transaction, LedgerEntryDirection.DEBIT, 100L);
-        addEntry(transaction, LedgerEntryDirection.CREDIT, 100L);
+        original.markReversed((short) 200, "{}");
+        transactionRepository.saveAndFlush(original);
+
+        List<String> violations = checker.findReversalViolations();
+
+        assertTrue(
+                violations.stream().anyMatch(v ->
+                        v.contains(original.getId().toString())
+                                && v.contains("exactly one completed reversal")),
+                "A REVERSED transaction without a completed reversal must be flagged");
+    }
+    @Test
+    @Transactional
+    void completedReversalWithOriginalStillCompletedIsDetected() {
+        Transaction original = createTransaction(
+                TransactionStatus.COMPLETED, 100L);
+
+        Transaction reversal = new Transaction(
+                UUID.randomUUID(),
+                TransactionType.REVERSAL,
+                "invariant-status-mismatch-" + UUID.randomUUID(),
+                new byte[32],
+                original.getAmount(),
+                original.getInitiatedBy(),
+                original.getDestinationWalletId(),
+                original.getSourceWalletId(),
+                original.getId()
+        );
+        reversal.complete((short) 201, "{}");
+        transactionRepository.saveAndFlush(reversal);
+
+        List<String> violations = checker.findReversalViolations();
+
+        assertTrue(
+                violations.stream().anyMatch(v ->
+                        v.contains(original.getId().toString())
+                                && v.contains("original transaction is not REVERSED")),
+                "A completed reversal must not point to an original still marked COMPLETED");
+    }
+    @Test
+    @Transactional
+    void reversalWithIncorrectLedgerEntriesIsDetected() {
+        Transaction original = createTransaction(
+                TransactionStatus.COMPLETED, 100L);
+
+        addEntry(original, LedgerEntryDirection.DEBIT, 100L);
+        addEntry(original, LedgerEntryDirection.CREDIT, 100L);
+
+        Transaction reversal = new Transaction(
+                UUID.randomUUID(),
+                TransactionType.REVERSAL,
+                "invariant-bad-reversal-" + UUID.randomUUID(),
+                new byte[32],
+                original.getAmount(),
+                original.getInitiatedBy(),
+                original.getDestinationWalletId(),
+                original.getSourceWalletId(),
+                original.getId()
+        );
+        reversal.complete((short) 201, "{}");
+        transactionRepository.saveAndFlush(reversal);
+
+        // Deliberately recreate the original postings instead of inverting them.
+        ledgerEntryRepository.saveAndFlush(new LedgerEntry(
+                reversal.getId(),
+                original.getSourceWalletId(),
+                LedgerEntryDirection.DEBIT,
+                100L
+        ));
+        ledgerEntryRepository.saveAndFlush(new LedgerEntry(
+                reversal.getId(),
+                original.getDestinationWalletId(),
+                LedgerEntryDirection.CREDIT,
+                100L
+        ));
+
+        original.markReversed((short) 200, "{}");
+        transactionRepository.saveAndFlush(original);
+
+        List<String> violations = checker.findReversalViolations();
+
+        assertTrue(
+                violations.stream().anyMatch(v ->
+                        v.contains(original.getId().toString())
+                                && v.contains("exact opposites")),
+                "A reversal with incorrect ledger directions must be flagged");
+    }
+    @Test
+    @Transactional
+    void reversalTransactionCannotItselfBeReversed() {
+        Transaction original = createTransaction(
+                TransactionStatus.COMPLETED, 100L);
+
+        addEntry(original, LedgerEntryDirection.DEBIT, 100L);
+        addEntry(original, LedgerEntryDirection.CREDIT, 100L);
+
+        Transaction reversal = new Transaction(
+                UUID.randomUUID(),
+                TransactionType.REVERSAL,
+                "invariant-reversal-" + UUID.randomUUID(),
+                new byte[32],
+                original.getAmount(),
+                original.getInitiatedBy(),
+                original.getDestinationWalletId(),
+                original.getSourceWalletId(),
+                original.getId()
+        );
+        reversal.complete((short) 201, "{}");
+        transactionRepository.saveAndFlush(reversal);
+
+        // Create an invalid child reversal pointing to the REVERSAL transaction.
+        Transaction reversalOfReversal = new Transaction(
+                UUID.randomUUID(),
+                TransactionType.REVERSAL,
+                "invariant-reversal-child-" + UUID.randomUUID(),
+                new byte[32],
+                reversal.getAmount(),
+                reversal.getInitiatedBy(),
+                reversal.getDestinationWalletId(),
+                reversal.getSourceWalletId(),
+                reversal.getId()
+        );
+        reversalOfReversal.complete((short) 201, "{}");
+        transactionRepository.saveAndFlush(reversalOfReversal);
+
+        List<String> violations = checker.findReversalViolations();
+
+        assertTrue(
+                violations.stream().anyMatch(v ->
+                        v.contains(reversal.getId().toString())
+                                && v.contains("cannot itself be reversed")),
+                "A REVERSAL transaction with a linked child reversal must be flagged");
+    }
+    @Test
+    @Transactional
+    void balancedReversedTransactionHasNoViolations() {
+        Transaction original = createTransaction(
+                TransactionStatus.COMPLETED, 100L);
+
+        addEntry(original, LedgerEntryDirection.DEBIT, 100L);
+        addEntry(original, LedgerEntryDirection.CREDIT, 100L);
+
+        Transaction reversal = new Transaction(
+                UUID.randomUUID(),
+                TransactionType.REVERSAL,
+                "invariant-reversal-" + UUID.randomUUID(),
+                new byte[32],
+                original.getAmount(),
+                original.getInitiatedBy(),
+                original.getDestinationWalletId(),
+                original.getSourceWalletId(),
+                original.getId()
+        );
+        reversal.complete((short) 201, "{}");
+        transactionRepository.saveAndFlush(reversal);
+
+        addEntry(reversal, LedgerEntryDirection.DEBIT, 100L);
+        addEntry(reversal, LedgerEntryDirection.CREDIT, 100L);
+
+        original.markReversed((short) 200, "{}");
+        transactionRepository.saveAndFlush(original);
 
         assertTrue(
                 checker.findViolations().isEmpty(),
-                "A balanced reversed transaction should have no violations");
+                "A correctly linked reversal with opposite ledger entries should have no violations");
     }
 
     @Test
