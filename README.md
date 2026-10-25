@@ -146,7 +146,7 @@ Start the required MySQL and Redis services using your configured local setup, t
 .\mvnw.cmd clean verify
 ```
 
-The 97-test result is a historical v1.0 checkpoint. The combined working-tree run completed successfully with 113 tests, 0 failures, 0 errors, and 0 skipped. The isolated Phase 1 snapshot separately passed 112 tests, 0 failures, 0 errors, and 0 skipped. The project retains its Surefire `forkCount=0` workaround because removing it caused a fork-startup failure in this environment.
+The 97-test result is a historical v1.0 checkpoint. An earlier combined working-tree checkpoint passed 113 tests, and the isolated Phase 1 snapshot passed 112 tests. The latest full working-tree verification on 2026-10-25 passed 140 tests, 0 failures, 0 errors, and 0 skipped. The project retains its Surefire `forkCount=0` workaround because removing it caused a fork-startup failure in this environment.
 
 To start Spring Boot from Maven:
 
@@ -162,15 +162,16 @@ Base URL for the local Docker setup: `http://localhost:8081`
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| `POST` | `/api/v1/users` | Create a user |
-| `POST` | `/api/v1/wallets` | Create a wallet for the caller |
+| `POST` | `/api/v1/users` | Register a user with a password |
+| `POST` | `/api/v1/auth/login` | Log in and obtain a JWT access token |
+| `POST` | `/api/v1/wallets` | Create a wallet for the authenticated caller |
 | `GET` | `/api/v1/wallets/{id}/balance` | Retrieve wallet information/balance |
 | `POST` | `/api/v1/wallets/{id}/topup` | Top up a wallet |
 | `POST` | `/api/v1/wallets/{id}/withdraw` | Withdraw from a wallet |
 | `POST` | `/api/v1/transfers` | Transfer funds between wallets |
 | `POST` | `/api/v1/transactions/{id}/reverse` | Reverse an eligible completed transaction |
 
-The user-creation request requires `name` and `email`. Protected operations use the `X-User-Id` header. Top-ups, withdrawals, transfers, and reversals require an `Idempotency-Key` header. Only the original transaction initiator may reverse it; completed top-ups, transfers, and withdrawals are eligible.
+Registration requires `name`, `email`, and `password`. Log in at `/api/v1/auth/login` to obtain a JWT. Protected `/api/**` endpoints require `Authorization: Bearer <token>`; a caller-supplied `X-User-Id` header is not accepted as authentication. Top-ups, withdrawals, transfers, and reversals require an `Idempotency-Key` header. Only the original transaction initiator may reverse an eligible completed transaction.
 
 Amounts are expressed in **paise**. For example, `10000` paise equals INR 100.00.
 
@@ -189,20 +190,25 @@ $base = 'http://localhost:8081'
 ```powershell
 curl.exe -i -X POST "$base/api/v1/users" `
   -H 'Content-Type: application/json' `
-  -d '{"name":"Alice","email":"alice@example.com"}'
+  -d '{"name":"Alice","email":"alice@example.com","password":"ValidPassword123!"}'
 ```
 
-The endpoint returns `201 Created`. Copy the actual user UUID from the response according to the response schema returned by your running application:
+The endpoint returns `201 Created`. Next, log in with the registered credentials and retain the access token for protected requests:
 
 ```powershell
-$userId = 'PASTE-RETURNED-USER-UUID-HERE'
+$login = Invoke-RestMethod -Method Post -Uri "$base/api/v1/auth/login" `
+  -ContentType 'application/json' `
+  -Body '{"email":"alice@example.com","password":"ValidPassword123!"}'
+
+$token = $login.accessToken
+$authHeader = "Authorization: Bearer $token"
 ```
 
 #### 2. Create a wallet
 
 ```powershell
 curl.exe -i -X POST "$base/api/v1/wallets" `
-  -H "X-User-Id: $userId"
+  -H $authHeader
 ```
 
 Copy the returned wallet UUID:
@@ -217,7 +223,7 @@ Create a second user and wallet in the same way if you want to test a transfer b
 
 ```powershell
 curl.exe -i "$base/api/v1/wallets/$walletId/balance" `
-  -H "X-User-Id: $userId"
+  -H $authHeader
 ```
 
 #### 4. Top up a wallet
@@ -226,7 +232,7 @@ Use a new idempotency key for a new logical operation:
 
 ```powershell
 curl.exe -i -X POST "$base/api/v1/wallets/$walletId/topup" `
-  -H "X-User-Id: $userId" `
+  -H $authHeader `
   -H 'Idempotency-Key: demo-topup-001' `
   -H 'Content-Type: application/json' `
   -d '{"amountPaise":10000}'
@@ -238,7 +244,7 @@ This example requests a top-up of INR 100.00.
 
 ```powershell
 curl.exe -i -X POST "$base/api/v1/wallets/$walletId/withdraw" `
-  -H "X-User-Id: $userId" `
+  -H $authHeader `
   -H 'Idempotency-Key: demo-withdraw-001' `
   -H 'Content-Type: application/json' `
   -d '{"amountPaise":1000}'
@@ -259,7 +265,7 @@ Then submit the transfer:
 
 ```powershell
 curl.exe -i -X POST "$base/api/v1/transfers" `
-  -H "X-User-Id: $userId" `
+  -H $authHeader `
   -H 'Idempotency-Key: demo-transfer-001' `
   -H 'Content-Type: application/json' `
   -d "{`"sourceWalletId`":`"$sourceWalletId`",`"destinationWalletId`":`"$destinationWalletId`",`"amountPaise`":1000}"
@@ -275,11 +281,11 @@ Use the original transaction ID returned by a successful top-up, withdrawal, or 
 $transactionId = "REPLACE-WITH-ORIGINAL-TRANSACTION-UUID"
 
 curl.exe -i -X POST "$base/api/v1/transactions/$transactionId/reverse" `
-  -H "X-User-Id: $userId" `
+  -H $authHeader `
   -H 'Idempotency-Key: demo-reversal-001'
 ```
 
-**Important:** `X-User-Id` is caller-supplied in this version. It is not authentication and must not be treated as a secure identity mechanism in a production deployment.
+**Authentication note:** Protected API requests use signed JWT bearer tokens. Treat access tokens as secrets. The 15-minute default token lifetime does not replace production secret rotation, TLS, authorization review, rate limiting, or other operational security controls.
 
 ## Testing and correctness
 
@@ -287,8 +293,8 @@ Latest verified Maven build:
 
 | Result | Count |
 |---|---:|
-| Test classes | 22 |
-| Tests run | 113 |
+| Test classes | 27 |
+| Tests run | 140 |
 | Failures | 0 |
 | Errors | 0 |
 | Skipped | 0 |
@@ -344,7 +350,7 @@ The hot-pair scenario concentrates traffic on two wallets and exercises contenti
 
 ## Security and operational limitations
 
-- `X-User-Id` is spoofable and is not a substitute for authentication and authorization.
+- JWT bearer authentication is implemented; production hardening, including secret rotation, TLS enforcement, rate limiting, and a security review, remains necessary.
 - A shared system wallet can become a contention hotspot.
 - The benchmarks ran on a single machine; they are not distributed production benchmarks.
 - Redis is provisioned but is not currently used by the core money-movement flow.
@@ -355,7 +361,7 @@ The hot-pair scenario concentrates traffic on two wallets and exercises contenti
 
 ## Next steps
 
-1. Add authenticated identity and enforce wallet ownership at the API boundary.
+1. Harden authentication and authorization for production deployment, including secret rotation, TLS, and security review.
 2. Implement an outbox publisher with reliable delivery, retries and observability.
 3. Add API rate limiting and operational monitoring.
 4. Add customer statement APIs.
@@ -364,6 +370,6 @@ The hot-pair scenario concentrates traffic on two wallets and exercises contenti
 
 ## Project status
 
-WalletLedger's current implemented scope includes transactional wallet operations, idempotent money movement, Phase 1 transaction reversals, ledger/audit/outbox integration, bounded deadlock retry, and concurrency/integrity tests. The combined working-tree run passed 113 tests; the isolated Phase 1 snapshot passed 112 tests. Both runs reported zero failures, errors, and skipped tests.
+WalletLedger's current implemented scope includes transactional wallet operations, idempotent money movement, Phase 1 transaction reversals, ledger/audit/outbox integration, bounded deadlock retry, concurrency/integrity tests, and JWT bearer authentication. The latest full working-tree verification on 2026-10-25 passed 140 tests, with 0 failures, 0 errors, and 0 skipped. Earlier checkpoints passed 113 combined working-tree tests and 112 tests in the isolated Phase 1 snapshot.
 
 The repository is published on GitHub for review and demonstration. The implemented scope, verification evidence, and known limitations are documented above. Benchmark results are local observations and do not establish production capacity.

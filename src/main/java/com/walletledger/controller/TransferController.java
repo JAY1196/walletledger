@@ -30,7 +30,7 @@ public class TransferController {
         this.deadlockRetryExecutor = deadlockRetryExecutor;
     }
 
-    @SecurityRequirement(name = "UserIdHeader")
+    @SecurityRequirement(name = "BearerAuth")
     @PostMapping
     public ResponseEntity<String> transfer(
             @Valid @RequestBody TransferRequest request,

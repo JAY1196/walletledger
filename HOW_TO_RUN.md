@@ -29,7 +29,7 @@ Set-Location walletledger
 Copy-Item .env.example .env
 ```
 
-Edit `.env` and replace every password placeholder with a strong, unique local password before starting the services. Do not commit or share your populated `.env` file.
+Edit `.env` and replace every password placeholder with a strong, unique local password. Set `WALLETLEDGER_SECURITY_JWT_SECRET` to a random Base64-encoded secret whose decoded value is at least 32 bytes. `WALLETLEDGER_SECURITY_JWT_EXPIRATION_SECONDS` defaults to `900` seconds (15 minutes). Do not commit or share your populated `.env` file or JWT secret.
 
 Build and start the application and its dependencies:
 
@@ -68,7 +68,7 @@ With Java 21 installed and Docker available for integration tests, run:
 .\mvnw.cmd clean verify
 ```
 
-The 97-test result is a historical v1.0 checkpoint. The isolated Phase 1 snapshot passed 112 tests, with 0 failures, 0 errors, and 0 skipped. The combined working-tree run on 2026-10-25 passed 113 tests, with 0 failures, 0 errors, and 0 skipped. Run the command again after future code changes. Results on another machine may differ depending on its environment and resources.
+Historical checkpoints: v1.0 passed 97 tests; the isolated Phase 1 snapshot passed 112 tests. The full working-tree verification on 2026-10-25 passed 140 tests, with 0 failures, 0 errors, and 0 skipped (`BUILD SUCCESS`). Run the command again after future code changes. Results on another machine may differ depending on its environment and resources.
 
 ## Run the API locally outside Docker
 

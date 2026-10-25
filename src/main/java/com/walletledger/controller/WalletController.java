@@ -40,7 +40,7 @@ public class WalletController {
         this.deadlockRetryExecutor = deadlockRetryExecutor;
     }
 
-    @SecurityRequirement(name = "UserIdHeader")
+    @SecurityRequirement(name = "BearerAuth")
     @PostMapping
     public ResponseEntity<WalletResponse> createWallet(
             HttpServletRequest request) {
@@ -50,7 +50,7 @@ public class WalletController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
-    @SecurityRequirement(name = "UserIdHeader")
+    @SecurityRequirement(name = "BearerAuth")
     @GetMapping("/{id}/balance")
     public ResponseEntity<WalletResponse> getBalance(
             @PathVariable UUID id,
@@ -61,7 +61,7 @@ public class WalletController {
         return ResponseEntity.ok(response);
     }
 
-    @SecurityRequirement(name = "UserIdHeader")
+    @SecurityRequirement(name = "BearerAuth")
     @PostMapping("/{id}/topup")
     public ResponseEntity<String> topUp(
             @PathVariable UUID id,
@@ -82,7 +82,7 @@ public class WalletController {
                 .body(response.body());
     }
 
-    @SecurityRequirement(name = "UserIdHeader")
+    @SecurityRequirement(name = "BearerAuth")
     @PostMapping("/{id}/withdraw")
     public ResponseEntity<String> withdraw(
             @PathVariable UUID id,

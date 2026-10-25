@@ -5,6 +5,7 @@ import com.walletledger.entity.LedgerEntry;
 import com.walletledger.entity.LedgerEntryDirection;
 import com.walletledger.entity.Wallet;
 import com.walletledger.service.LedgerInvariantChecker;
+import com.walletledger.service.JwtService;
 import com.walletledger.repository.LedgerEntryRepository;
 import com.walletledger.repository.OutboxEventRepository;
 import com.walletledger.repository.TransactionAuditRepository;
@@ -47,6 +48,16 @@ class WalletMoneyMovementIntegrationTest {
     private MockMvc mockMvc;
 
     @Autowired
+    private JwtService jwtService;
+
+    private String bearerToken(Object userId) {
+        UUID id = userId instanceof UUID uuid
+                ? uuid
+                : UUID.fromString(userId.toString());
+        return "Bearer " + jwtService.generateToken(id);
+    }
+
+    @Autowired
     private LedgerInvariantChecker ledgerInvariantChecker;
 
     @Autowired
@@ -73,7 +84,7 @@ class WalletMoneyMovementIntegrationTest {
         String response = mockMvc.perform(post("/api/v1/users")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"name":"Money Movement Test User","email":"%s"}
+                                {"name":"Money Movement Test User","email":"%s","password":"ValidPassword123!"}
                                 """.formatted(email)))
                 .andExpect(status().isCreated())
                 .andReturn()
@@ -85,7 +96,7 @@ class WalletMoneyMovementIntegrationTest {
 
     private String createWallet(String userId) throws Exception {
         String response = mockMvc.perform(post("/api/v1/wallets")
-                        .header("X-User-Id", userId))
+                        .header("Authorization", bearerToken(userId)))
                 .andExpect(status().isCreated())
                 .andReturn()
                 .getResponse()
@@ -100,7 +111,7 @@ class WalletMoneyMovementIntegrationTest {
                 .orElseThrow();
 
         mockMvc.perform(post("/api/v1/wallets/{id}/topup", walletId)
-                        .header("X-User-Id", wallet.getUserId())
+                        .header("Authorization", bearerToken(wallet.getUserId()))
                         .header("Idempotency-Key", "test-fund-" + UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(movementBody(amountPaise)))
@@ -128,7 +139,7 @@ class WalletMoneyMovementIntegrationTest {
 
         String response = mockMvc.perform(post(
                         "/api/v1/wallets/{id}/topup", walletId)
-                        .header("X-User-Id", userId)
+                        .header("Authorization", bearerToken(userId))
                         .header("Idempotency-Key", key)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(movementBody(300)))
@@ -193,7 +204,7 @@ class WalletMoneyMovementIntegrationTest {
         // Top up the wallet with 1,000 paise.
         mockMvc.perform(post(
                         "/api/v1/wallets/{id}/topup", walletId)
-                        .header("X-User-Id", userId)
+                        .header("Authorization", bearerToken(userId))
                         .header("Idempotency-Key", "mixed-topup-" + UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(movementBody(1000)))
@@ -204,7 +215,7 @@ class WalletMoneyMovementIntegrationTest {
         // Withdraw 300 paise from the same wallet.
         mockMvc.perform(post(
                         "/api/v1/wallets/{id}/withdraw", walletId)
-                        .header("X-User-Id", userId)
+                        .header("Authorization", bearerToken(userId))
                         .header("Idempotency-Key", "mixed-withdraw-" + UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(movementBody(300)))
@@ -226,7 +237,7 @@ class WalletMoneyMovementIntegrationTest {
 
         String response = mockMvc.perform(post(
                         "/api/v1/wallets/{id}/withdraw", walletId)
-                        .header("X-User-Id", userId)
+                        .header("Authorization", bearerToken(userId))
                         .header("Idempotency-Key", key)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(movementBody(300)))
@@ -291,7 +302,7 @@ class WalletMoneyMovementIntegrationTest {
 
         String firstResponse = mockMvc.perform(post(
                         "/api/v1/wallets/{id}/topup", walletId)
-                        .header("X-User-Id", userId)
+                        .header("Authorization", bearerToken(userId))
                         .header("Idempotency-Key", key)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(movementBody(500)))
@@ -302,7 +313,7 @@ class WalletMoneyMovementIntegrationTest {
 
         String retryResponse = mockMvc.perform(post(
                         "/api/v1/wallets/{id}/topup", walletId)
-                        .header("X-User-Id", userId)
+                        .header("Authorization", bearerToken(userId))
                         .header("Idempotency-Key", key)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(movementBody(500)))
@@ -331,7 +342,7 @@ class WalletMoneyMovementIntegrationTest {
 
         mockMvc.perform(post(
                         "/api/v1/wallets/{id}/withdraw", walletId)
-                        .header("X-User-Id", userId)
+                        .header("Authorization", bearerToken(userId))
                         .header("Idempotency-Key", "withdraw-insufficient-"
                                 + UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON)
@@ -349,14 +360,14 @@ class WalletMoneyMovementIntegrationTest {
         String key = "topup-conflict-" + UUID.randomUUID();
 
         mockMvc.perform(post("/api/v1/wallets/{id}/topup", walletId)
-                        .header("X-User-Id", userId)
+                        .header("Authorization", bearerToken(userId))
                         .header("Idempotency-Key", key)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(movementBody(500)))
                 .andExpect(status().isCreated());
 
         mockMvc.perform(post("/api/v1/wallets/{id}/topup", walletId)
-                        .header("X-User-Id", userId)
+                        .header("Authorization", bearerToken(userId))
                         .header("Idempotency-Key", key)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(movementBody(700)))
@@ -373,14 +384,14 @@ class WalletMoneyMovementIntegrationTest {
         String key = "cross-operation-" + UUID.randomUUID();
 
         mockMvc.perform(post("/api/v1/wallets/{id}/topup", walletId)
-                        .header("X-User-Id", userId)
+                        .header("Authorization", bearerToken(userId))
                         .header("Idempotency-Key", key)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(movementBody(500)))
                 .andExpect(status().isCreated());
 
         mockMvc.perform(post("/api/v1/wallets/{id}/withdraw", walletId)
-                        .header("X-User-Id", userId)
+                        .header("Authorization", bearerToken(userId))
                         .header("Idempotency-Key", key)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(movementBody(500)))
@@ -411,7 +422,7 @@ class WalletMoneyMovementIntegrationTest {
                 }
 
                 return mockMvc.perform(post("/api/v1/wallets/{id}/topup", walletId)
-                                .header("X-User-Id", userId)
+                                .header("Authorization", bearerToken(userId))
                                 .header("Idempotency-Key", key)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(body))
@@ -484,7 +495,7 @@ class WalletMoneyMovementIntegrationTest {
                 }
 
                 return mockMvc.perform(post("/api/v1/wallets/{id}/withdraw", walletId)
-                                .header("X-User-Id", userId)
+                                .header("Authorization", bearerToken(userId))
                                 .header("Idempotency-Key", keyOne)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(body))
@@ -500,7 +511,7 @@ class WalletMoneyMovementIntegrationTest {
                 }
 
                 return mockMvc.perform(post("/api/v1/wallets/{id}/withdraw", walletId)
-                                .header("X-User-Id", userId)
+                                .header("Authorization", bearerToken(userId))
                                 .header("Idempotency-Key", keyTwo)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(body))
@@ -581,7 +592,7 @@ class WalletMoneyMovementIntegrationTest {
             int outboxEventsBefore = outboxEventRepository.findAll().size();
 
             mockMvc.perform(post("/api/v1/wallets/{id}/topup", walletId)
-                            .header("X-User-Id", userId)
+                            .header("Authorization", bearerToken(userId))
                             .header("Idempotency-Key", key)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(movementBody(100)))
@@ -630,14 +641,14 @@ class WalletMoneyMovementIntegrationTest {
         int transactionsBefore = transactionRepository.findAll().size();
 
         mockMvc.perform(post("/api/v1/wallets/{id}/topup", walletId)
-                        .header("X-User-Id", otherUserId)
+                        .header("Authorization", bearerToken(otherUserId))
                         .header("Idempotency-Key", "unauthorized-topup-" + UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(movementBody(100)))
                 .andExpect(status().isNotFound());
 
         mockMvc.perform(post("/api/v1/wallets/{id}/withdraw", walletId)
-                        .header("X-User-Id", otherUserId)
+                        .header("Authorization", bearerToken(otherUserId))
                         .header("Idempotency-Key", "unauthorized-withdraw-" + UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(movementBody(100)))

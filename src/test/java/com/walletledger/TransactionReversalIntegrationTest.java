@@ -13,6 +13,7 @@ import com.walletledger.entity.OutboxEvent;
 
 
 import com.walletledger.repository.WalletRepository;
+import com.walletledger.service.JwtService;
 import com.walletledger.service.LedgerInvariantChecker;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -62,6 +63,16 @@ class TransactionReversalIntegrationTest {
     private MockMvc mockMvc;
 
     @Autowired
+    private JwtService jwtService;
+
+    private String bearerToken(Object userId) {
+        UUID id = userId instanceof UUID uuid
+                ? uuid
+                : UUID.fromString(userId.toString());
+        return "Bearer " + jwtService.generateToken(id);
+    }
+
+    @Autowired
     private TransactionRepository transactionRepository;
 
     @Autowired
@@ -93,7 +104,7 @@ class TransactionReversalIntegrationTest {
         String response = mockMvc.perform(post("/api/v1/users")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"name":"Reversal Test User","email":"%s"}
+                                {"name":"Reversal Test User","email":"%s","password":"ValidPassword123!"}
                                 """.formatted(email)))
                 .andExpect(status().isCreated())
                 .andReturn()
@@ -105,7 +116,7 @@ class TransactionReversalIntegrationTest {
 
     private String createWallet(String userId) throws Exception {
         String response = mockMvc.perform(post("/api/v1/wallets")
-                        .header("X-User-Id", userId))
+                        .header("Authorization", bearerToken(userId)))
                 .andExpect(status().isCreated())
                 .andReturn()
                 .getResponse()
@@ -118,7 +129,7 @@ class TransactionReversalIntegrationTest {
             throws Exception {
         String response = mockMvc.perform(post(
                         "/api/v1/wallets/{id}/topup", walletId)
-                        .header("X-User-Id", userId)
+                        .header("Authorization", bearerToken(userId))
                         .header("Idempotency-Key", "original-topup-" + UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -136,7 +147,7 @@ class TransactionReversalIntegrationTest {
             throws Exception {
         return mockMvc.perform(post(
                         "/api/v1/transactions/{id}/reverse", transactionId)
-                        .header("X-User-Id", userId)
+                        .header("Authorization", bearerToken(userId))
                         .header("Idempotency-Key", key))
                 .andExpect(status().isCreated())
                 .andReturn()
@@ -151,7 +162,7 @@ class TransactionReversalIntegrationTest {
             long amountPaise) throws Exception {
 
         String response = mockMvc.perform(post("/api/v1/transfers")
-                        .header("X-User-Id", senderId)
+                        .header("Authorization", bearerToken(senderId))
                         .header("Idempotency-Key",
                                 "transfer-test-" + UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON)
@@ -248,7 +259,7 @@ class TransactionReversalIntegrationTest {
 
         mockMvc.perform(post(
                         "/api/v1/transactions/{id}/reverse", originalId)
-                        .header("X-User-Id", otherUserId)
+                        .header("Authorization", bearerToken(otherUserId))
                         .header("Idempotency-Key", key))
                 .andExpect(status().isForbidden());
 
@@ -272,7 +283,7 @@ class TransactionReversalIntegrationTest {
 
         mockMvc.perform(post(
                         "/api/v1/transactions/{id}/reverse", originalId)
-                        .header("X-User-Id", userId)
+                        .header("Authorization", bearerToken(userId))
                         .header("Idempotency-Key",
                                 "reverse-second-" + UUID.randomUUID()))
                 .andExpect(status().isConflict());
@@ -301,7 +312,7 @@ class TransactionReversalIntegrationTest {
 
         mockMvc.perform(post(
                         "/api/v1/transactions/{id}/reverse", secondOriginalId)
-                        .header("X-User-Id", userId)
+                        .header("Authorization", bearerToken(userId))
                         .header("Idempotency-Key", sharedKey))
                 .andExpect(status().isConflict());
 
@@ -333,7 +344,7 @@ class TransactionReversalIntegrationTest {
 
         mockMvc.perform(post(
                         "/api/v1/transactions/{id}/reverse", reversalId)
-                        .header("X-User-Id", userId)
+                        .header("Authorization", bearerToken(userId))
                         .header("Idempotency-Key",
                                 "reverse-the-reversal-" + UUID.randomUUID()))
                 .andExpect(status().isConflict());
@@ -391,7 +402,7 @@ class TransactionReversalIntegrationTest {
 
         mockMvc.perform(post(
                         "/api/v1/transactions/{id}/reverse", originalTransferId)
-                        .header("X-User-Id", senderId)
+                        .header("Authorization", bearerToken(senderId))
                         .header("Idempotency-Key",
                                 "insufficient-reversal-" + UUID.randomUUID()))
                 .andExpect(status().isUnprocessableEntity());
@@ -439,7 +450,7 @@ class TransactionReversalIntegrationTest {
 
         String withdrawalResponse = mockMvc.perform(post(
                         "/api/v1/wallets/{id}/withdraw", walletId)
-                        .header("X-User-Id", userId)
+                        .header("Authorization", bearerToken(userId))
                         .header("Idempotency-Key", withdrawalKey)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -567,7 +578,7 @@ class TransactionReversalIntegrationTest {
                         return mockMvc.perform(post(
                                         "/api/v1/transactions/{id}/reverse",
                                         originalId)
-                                        .header("X-User-Id", userId)
+                                        .header("Authorization", bearerToken(userId))
                                         .header("Idempotency-Key",
                                                 "concurrent-reverse-"
                                                         + requestNumber + "-"
@@ -661,7 +672,7 @@ class TransactionReversalIntegrationTest {
         try {
             mockMvc.perform(post(
                             "/api/v1/transactions/{id}/reverse", originalId)
-                            .header("X-User-Id", userId)
+                            .header("Authorization", bearerToken(userId))
                             .header("Idempotency-Key",
                                     "forced-reversal-failure-" + UUID.randomUUID()))
                     .andExpect(status().isInternalServerError());

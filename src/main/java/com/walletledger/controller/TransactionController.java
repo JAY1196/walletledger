@@ -30,7 +30,7 @@ public class TransactionController {
         this.deadlockRetryExecutor = deadlockRetryExecutor;
     }
 
-    @SecurityRequirement(name = "UserIdHeader")
+    @SecurityRequirement(name = "BearerAuth")
     @PostMapping("/{id}/reverse")
     public ResponseEntity<String> reverse(
             @PathVariable UUID id,

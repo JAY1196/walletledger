@@ -3,9 +3,9 @@ spring:
 
     hikari:
       pool-name: WalletLedgerTestHikari
-      maximum-pool-size: 5
+      maximum-pool-size: 16
       minimum-idle: 1
-      connection-timeout: 3000
+      connection-timeout: 10000
       validation-timeout: 1000
       transaction-isolation: TRANSACTION_READ_COMMITTED
       connection-init-sql: "SET SESSION time_zone = '+00:00', innodb_lock_wait_timeout = 5"
@@ -28,3 +28,7 @@ spring:
       port: ${TEST_REDIS_PORT:6380}
       connect-timeout: 2s
       timeout: 2s
+walletledger:
+  security:
+    jwt:
+      secret: "dGVzdC1vbmx5LWtleS1mb3Itd2FsbGV0bGVkZ2VyLTIwMjYh"

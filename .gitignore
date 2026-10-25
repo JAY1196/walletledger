@@ -43,3 +43,6 @@ build/
 
 # Generated k6 benchmark result files
 k6/*.json
+
+.phase2-auth-backup-*/
+*.bak*
