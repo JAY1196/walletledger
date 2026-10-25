@@ -243,7 +243,7 @@ This section records scope boundaries; it is not a claim that every item was com
 - **Verified:** Lock ordering through `WalletLockOrder`, its production call sites, and the parity test.
 - **Verified:** Concurrent wallet creation and same-email registration race tests.
 - **Verified:** The 2,000 opposite-direction transfer stress test and local k6 benchmark scenarios.
-- **Not implemented:** Transaction reversals and customer statement APIs.
+- **Implemented in Phase 1:** Transaction reversal posting and API. Customer statement APIs remain unimplemented.
 - **Open:** Authentication and authorization hardening, outbox publishing, rate limiting, and production deployment controls.
 - **Deferred by scope:** Fraud detection; retain the outbox for possible future integration, but do not implement fraud features in this project phase.
 
@@ -284,7 +284,7 @@ The following are **Open**; they are not represented as completed:
 - **Open:** Implement and operate the transactional outbox publisher.
 - **Open:** Add API rate limiting, production monitoring, and deployment controls.
 - **Open:** Rerun k6 scenarios against the packaged Docker application in a dedicated environment.
-- **Not implemented:** Transaction reversal and customer statement APIs.
+- **Implemented in Phase 1:** Transaction reversal posting and API. Customer statement APIs remain unimplemented.
 - **Deferred:** Fraud detection remains out of scope. Do not build fraud features as part of this work.
 
 **Migration safeguard:** Do not edit already-applied Flyway V1/V2 migrations to change the existing schema. Use a new versioned migration for future schema changes.
@@ -305,9 +305,9 @@ The existing tests and local benchmarks do not establish production readiness.
 - Database protections reject updates and deletes against append-only ledger and audit records.
 - The invariant checker detects integrity problems including completed transactions without the expected ledger entries and inconsistent debit/credit or transaction totals. The later verification also covers cached-wallet-balance reconciliation and the global wallet-balance sum.
 
-These are implementation and test claims, not a guarantee of production readiness. Reversal posting and reversal APIs remain unimplemented.
+These are implementation and test claims, not a guarantee of production readiness. Phase 1 transaction reversals are implemented. On 2026-10-25, the isolated Phase 1 snapshot passed 112 tests and the combined working-tree run passed 113 tests; both had 0 failures, 0 errors, and 0 skipped.
 
-The ledger core and money-movement integration have progressed beyond the earlier Module 3 snapshot. The latest recorded test baseline is 97 tests across 21 classes, with zero failures, errors, or skipped tests.
+The ledger core and money-movement integration have progressed beyond the earlier Module 3 snapshot. Historical v1.0 baseline: 97 tests across 21 classes. The isolated Phase 1 snapshot later passed 112 tests; the combined working-tree run passed 113 tests. Both later runs reported zero failures, errors, and skipped tests.
 
 Verified behavior includes:
 
@@ -318,7 +318,7 @@ Verified behavior includes:
 - A 2,000-transfer opposite-direction stress test.
 - A controlled real-MySQL 1213 deadlock test proving bounded retry recovery.
 
-**Not implemented:** Reversal posting and reversal APIs.
+**Implemented in Phase 1:** Reversal posting and reversal APIs. The isolated Phase 1 snapshot passed 112 tests; the combined working-tree run passed 113 tests, with 0 failures, 0 errors, and 0 skipped in both runs.
 
 ## 21. Earlier combined benchmark and integrity run (2026-10-23)
 
@@ -469,3 +469,32 @@ The saved k6 JSON summaries mark all five configured threshold flags as `false`.
 - These local results do not demonstrate production capacity or production readiness.
 - The benchmark was not run against the packaged Docker application.
 - Fraud detection remains out of scope; the outbox is retained for future integration.
+
+
+## 23. Phase 1 transaction reversals
+
+**Scope:** Reverse an eligible completed top-up, withdrawal, or transfer. The original transaction's initiator must request the reversal. Reversal-of-reversal is rejected.
+
+**Atomicity:** The original transaction state change, reversal transaction, balanced opposite ledger entries, wallet balance changes, audit records, idempotency response, and `TRANSACTION_REVERSED` outbox event participate in the database transaction. A failure must roll back the complete operation.
+
+**Idempotency and concurrency:** Repeating the same logical request with the same idempotency key replays its stored response. Reusing a key for a different request conflicts. The database uniqueness constraint and locking protect against multiple successful reversals of the same original transaction.
+
+**Integrity:** The invariant checker verifies transaction-level ledger balance, wallet cached balances against ledger entries, global wallet balance, and reversal relationships. Reversal-specific checks detect lifecycle mismatches and invalid reversal chains.
+
+**Focused verification recorded:** `TransactionReversalIntegrationTest` passed 11 tests, and `LedgerInvariantCheckerIntegrationTest` passed 14 tests in the reported focused runs. These are focused test results, not the final full-suite result.
+
+**Verified:** The combined working-tree run completed successfully on 2026-10-25 with 113 tests, 0 failures, 0 errors, and 0 skipped. The isolated Phase 1 snapshot separately passed 112 tests with the same zero-failure result.
+
+## 24. v1.1 full-suite verification (2026-10-25)
+
+Command: `.\mvnw.cmd clean verify`
+
+Result: **BUILD SUCCESS**
+
+- Tests run: 113
+- Failures: 0
+- Errors: 0
+- Skipped: 0
+- Total time: 5 minutes 48 seconds
+
+This verifies the current v1.1 code and tests in the reported local environment. It does not establish production readiness or guarantee identical results in other environments.

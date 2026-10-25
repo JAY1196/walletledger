@@ -2,7 +2,7 @@
 
 ## Highlights
 
-- 97 automated tests across 21 test classes; zero failures, errors, or skipped tests in the recorded run.
+- Phase 1 transaction reversals are implemented. Isolated Phase 1 verification passed: 112 tests, 0 failures, 0 errors, 0 skipped. The combined working-tree run passed 113 tests.
 - 2,000 opposite-direction concurrent transfers tested, plus a forced real-MySQL error 1213 deadlock recovery test.
 - Two per-scenario k6 runs completed 6,181 iterations up to 25 VUs, with 0% reported HTTP failures and zero integrity violations afterward.
 - Double-entry ledger postings, transaction audit records, and outbox events are written within the same transaction.
@@ -11,7 +11,7 @@ A production-style REST backend for wallet operations, built with Java 21, Sprin
 
 ## What it does
 
-WalletLedger supports user and wallet creation, balance queries, top-ups, withdrawals, and transfers. Money movement uses idempotency keys, transactional database operations, wallet locking, bounded MySQL deadlock retries, and ledger/audit/outbox records.
+WalletLedger supports user and wallet creation, balance queries, top-ups, withdrawals, transfers, and transaction reversals. Money movement uses idempotency keys, transactional database operations, wallet locking, bounded MySQL deadlock retries, and ledger/audit/outbox records.
 
 ## Architecture
 
@@ -79,7 +79,7 @@ The exact transaction and locking behavior is implemented in the application ser
 - Store monetary amounts as integer paise rather than floating-point values.
 - Generate UUIDs in the application; wallet/user identifiers use the project's database mapping.
 - Use MySQL transactions and wallet locking for money movement.
-- Require idempotency keys for top-ups, withdrawals, and transfers.
+- Require idempotency keys for top-ups, withdrawals, transfers, and reversals.
 - Keep ledger entries, transaction audit records, and outbox events in the database transaction.
 - Apply bounded retries to recognized MySQL deadlock error 1213.
 - Use a separate application database account with restricted permissions; Flyway uses the owner account.
@@ -146,7 +146,7 @@ Start the required MySQL and Redis services using your configured local setup, t
 .\mvnw.cmd clean verify
 ```
 
-The verified Windows build completed with **97 tests, zero failures, zero errors, and zero skipped tests**. The project retains its Surefire `forkCount=0` workaround because removing it caused a fork-startup failure in this environment.
+The 97-test result is a historical v1.0 checkpoint. The combined working-tree run completed successfully with 113 tests, 0 failures, 0 errors, and 0 skipped. The isolated Phase 1 snapshot separately passed 112 tests, 0 failures, 0 errors, and 0 skipped. The project retains its Surefire `forkCount=0` workaround because removing it caused a fork-startup failure in this environment.
 
 To start Spring Boot from Maven:
 
@@ -168,8 +168,9 @@ Base URL for the local Docker setup: `http://localhost:8081`
 | `POST` | `/api/v1/wallets/{id}/topup` | Top up a wallet |
 | `POST` | `/api/v1/wallets/{id}/withdraw` | Withdraw from a wallet |
 | `POST` | `/api/v1/transfers` | Transfer funds between wallets |
+| `POST` | `/api/v1/transactions/{id}/reverse` | Reverse an eligible completed transaction |
 
-The user-creation request requires `name` and `email`. Wallet-scoped operations and transfers use the `X-User-Id` header. Top-ups, withdrawals, and transfers also require an `Idempotency-Key` header.
+The user-creation request requires `name` and `email`. Protected operations use the `X-User-Id` header. Top-ups, withdrawals, transfers, and reversals require an `Idempotency-Key` header. Only the original transaction initiator may reverse it; completed top-ups, transfers, and withdrawals are eligible.
 
 Amounts are expressed in **paise**. For example, `10000` paise equals INR 100.00.
 
@@ -266,6 +267,18 @@ curl.exe -i -X POST "$base/api/v1/transfers" `
 
 This example requests a transfer of INR 10.00. Replace the sample idempotency key when initiating a distinct operation. For a retry of the same logical request, reuse the original key and request details.
 
+#### 6. Reverse a completed transaction
+
+Use the original transaction ID returned by a successful top-up, withdrawal, or transfer. The caller must be the original transaction's initiator.
+
+```powershell
+$transactionId = "REPLACE-WITH-ORIGINAL-TRANSACTION-UUID"
+
+curl.exe -i -X POST "$base/api/v1/transactions/$transactionId/reverse" `
+  -H "X-User-Id: $userId" `
+  -H 'Idempotency-Key: demo-reversal-001'
+```
+
 **Important:** `X-User-Id` is caller-supplied in this version. It is not authentication and must not be treated as a secure identity mechanism in a production deployment.
 
 ## Testing and correctness
@@ -274,8 +287,8 @@ Latest verified Maven build:
 
 | Result | Count |
 |---|---:|
-| Test classes | 21 |
-| Tests run | 97 |
+| Test classes | 22 |
+| Tests run | 113 |
 | Failures | 0 |
 | Errors | 0 |
 | Skipped | 0 |
@@ -337,7 +350,7 @@ The hot-pair scenario concentrates traffic on two wallets and exercises contenti
 - Redis is provisioned but is not currently used by the core money-movement flow.
 - Outbox events are recorded, but a production outbox publisher and delivery/retry workflow are not implemented.
 - No fraud detection engine is included in this version.
-- Reversals, customer statements and API rate limiting are not implemented.
+- Transaction reversals are implemented in Phase 1; customer statements and API rate limiting are not implemented.
 - Production deployment still requires proper identity, authorization, secrets management, monitoring, operational recovery procedures and security review.
 
 ## Next steps
@@ -345,12 +358,12 @@ The hot-pair scenario concentrates traffic on two wallets and exercises contenti
 1. Add authenticated identity and enforce wallet ownership at the API boundary.
 2. Implement an outbox publisher with reliable delivery, retries and observability.
 3. Add API rate limiting and operational monitoring.
-4. Design reversals and customer statement APIs.
+4. Add customer statement APIs.
 5. Rerun the k6 scenarios in a dedicated environment using the packaged Docker application, and document the environment and limits.
 6. Consider fraud detection as a separate future module, consuming published events rather than adding fraud logic to this version.
 
 ## Project status
 
-WalletLedger's current implemented scope is a transactional wallet backend with idempotent money movement, ledger/audit/outbox integration, bounded deadlock retry, and concurrency/integrity tests. The current verified test baseline is 97 passing tests.
+WalletLedger's current implemented scope includes transactional wallet operations, idempotent money movement, Phase 1 transaction reversals, ledger/audit/outbox integration, bounded deadlock retry, and concurrency/integrity tests. The combined working-tree run passed 113 tests; the isolated Phase 1 snapshot passed 112 tests. Both runs reported zero failures, errors, and skipped tests.
 
 The repository is published on GitHub for review and demonstration. The implemented scope, verification evidence, and known limitations are documented above. Benchmark results are local observations and do not establish production capacity.

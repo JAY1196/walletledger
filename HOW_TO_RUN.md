@@ -68,7 +68,7 @@ With Java 21 installed and Docker available for integration tests, run:
 .\mvnw.cmd clean verify
 ```
 
-The documented verification baseline is 97 tests across 21 test classes, with zero failures, errors, or skipped tests. Results on another machine may differ depending on its environment and resources.
+The 97-test result is a historical v1.0 checkpoint. The isolated Phase 1 snapshot passed 112 tests, with 0 failures, 0 errors, and 0 skipped. The combined working-tree run on 2026-10-25 passed 113 tests, with 0 failures, 0 errors, and 0 skipped. Run the command again after future code changes. Results on another machine may differ depending on its environment and resources.
 
 ## Run the API locally outside Docker
 
