@@ -11,6 +11,7 @@ import com.walletledger.repository.OutboxEventRepository;
 import com.walletledger.entity.OutboxEvent;
 import com.walletledger.repository.WalletRepository;
 import com.walletledger.service.LedgerInvariantChecker;
+import com.walletledger.service.JwtService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -49,6 +50,16 @@ class TransferIntegrationTest {
     private MockMvc mockMvc;
 
     @Autowired
+    private JwtService jwtService;
+
+    private String bearerToken(Object userId) {
+        UUID id = userId instanceof UUID uuid
+                ? uuid
+                : UUID.fromString(userId.toString());
+        return "Bearer " + jwtService.generateToken(id);
+    }
+
+    @Autowired
     private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
     @Autowired
@@ -79,7 +90,7 @@ class TransferIntegrationTest {
         String response = mockMvc.perform(post("/api/v1/users")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"name":"Transfer Test User","email":"%s"}
+                                {"name":"Transfer Test User","email":"%s","password":"ValidPassword123!"}
                                 """.formatted(email)))
                 .andExpect(status().isCreated())
                 .andReturn()
@@ -91,7 +102,7 @@ class TransferIntegrationTest {
 
     private String createWallet(String userId) throws Exception {
         String response = mockMvc.perform(post("/api/v1/wallets")
-                        .header("X-User-Id", userId))
+                        .header("Authorization", bearerToken(userId)))
                 .andExpect(status().isCreated())
                 .andReturn()
                 .getResponse()
@@ -107,7 +118,7 @@ class TransferIntegrationTest {
 
 
         mockMvc.perform(post("/api/v1/wallets/{id}/topup", walletId)
-                        .header("X-User-Id", wallet.getUserId())
+                        .header("Authorization", bearerToken(wallet.getUserId()))
                         .header("Idempotency-Key", "test-fund-" + UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -183,7 +194,7 @@ class TransferIntegrationTest {
         fundWallet(sourceId, 1000);
 
         String response = mockMvc.perform(post("/api/v1/transfers")
-                        .header("X-User-Id", senderId)
+                        .header("Authorization", bearerToken(senderId))
                         .header("Idempotency-Key", "transfer-" + UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(transferBody(sourceId, destinationId, 300)))
@@ -259,7 +270,7 @@ class TransferIntegrationTest {
         String destinationId = createWallet(receiverId);
 
         mockMvc.perform(post("/api/v1/transfers")
-                        .header("X-User-Id", senderId)
+                        .header("Authorization", bearerToken(senderId))
                         .header("Idempotency-Key", "insufficient-" + UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(transferBody(sourceId, destinationId, 100)))
@@ -278,7 +289,7 @@ class TransferIntegrationTest {
         fundWallet(sourceId, 1000);
 
         mockMvc.perform(post("/api/v1/transfers")
-                        .header("X-User-Id", anotherUserId)
+                        .header("Authorization", bearerToken(anotherUserId))
                         .header("Idempotency-Key", "ownership-" + UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(transferBody(sourceId, destinationId, 100)))
@@ -302,7 +313,7 @@ class TransferIntegrationTest {
         String body = transferBody(sourceId, destinationId, 250);
 
         String firstResponse = mockMvc.perform(post("/api/v1/transfers")
-                        .header("X-User-Id", senderId)
+                        .header("Authorization", bearerToken(senderId))
                         .header("Idempotency-Key", key)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
@@ -312,7 +323,7 @@ class TransferIntegrationTest {
                 .getContentAsString();
 
         String secondResponse = mockMvc.perform(post("/api/v1/transfers")
-                        .header("X-User-Id", senderId)
+                        .header("Authorization", bearerToken(senderId))
                         .header("Idempotency-Key", key)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
@@ -353,14 +364,14 @@ class TransferIntegrationTest {
         String key = "mismatch-" + UUID.randomUUID();
 
         mockMvc.perform(post("/api/v1/transfers")
-                        .header("X-User-Id", senderId)
+                        .header("Authorization", bearerToken(senderId))
                         .header("Idempotency-Key", key)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(transferBody(sourceId, destinationId, 200)))
                 .andExpect(status().isCreated());
 
         mockMvc.perform(post("/api/v1/transfers")
-                        .header("X-User-Id", senderId)
+                        .header("Authorization", bearerToken(senderId))
                         .header("Idempotency-Key", key)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(transferBody(sourceId, destinationId, 300)))
@@ -397,7 +408,7 @@ class TransferIntegrationTest {
                 }
 
                 return mockMvc.perform(post("/api/v1/transfers")
-                                .header("X-User-Id", senderId)
+                                .header("Authorization", bearerToken(senderId))
                                 .header("Idempotency-Key", key)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(body))
@@ -477,7 +488,7 @@ class TransferIntegrationTest {
                     throw new IllegalStateException("Timed out waiting to start.");
                 }
                 return mockMvc.perform(post("/api/v1/transfers")
-                                .header("X-User-Id", senderId)
+                                .header("Authorization", bearerToken(senderId))
                                 .header("Idempotency-Key", keyOne)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(bodyOne))
@@ -490,7 +501,7 @@ class TransferIntegrationTest {
                     throw new IllegalStateException("Timed out waiting to start.");
                 }
                 return mockMvc.perform(post("/api/v1/transfers")
-                                .header("X-User-Id", senderId)
+                                .header("Authorization", bearerToken(senderId))
                                 .header("Idempotency-Key", keyTwo)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(bodyTwo))
@@ -575,7 +586,7 @@ class TransferIntegrationTest {
 
         try {
             mockMvc.perform(post("/api/v1/transfers")
-                            .header("X-User-Id", senderId)
+                            .header("Authorization", bearerToken(senderId))
                             .header("Idempotency-Key", key)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(transferBody(sourceId, destinationId, 1)))
@@ -642,7 +653,7 @@ class TransferIntegrationTest {
                 .saveAndFlush(any(OutboxEvent.class));
 
         mockMvc.perform(post("/api/v1/transfers")
-                        .header("X-User-Id", senderId)
+                        .header("Authorization", bearerToken(senderId))
                         .header("Idempotency-Key", key)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(transferBody(sourceId, destinationId, 100)))
@@ -713,7 +724,7 @@ class TransferIntegrationTest {
                     int destinationIndex = (sourceIndex + 1) % walletCount;
 
                     MvcResult result = mockMvc.perform(post("/api/v1/transfers")
-                                    .header("X-User-Id", userIds.get(sourceIndex))
+                                    .header("Authorization", bearerToken(userIds.get(sourceIndex)))
                                     .header("Idempotency-Key",
                                             "wallet-pool-" + transferIndex + "-"
                                                     + UUID.randomUUID())
@@ -791,7 +802,7 @@ class TransferIntegrationTest {
                     String sourceUser = aToB ? userA : userB;
 
                     MvcResult result = mockMvc.perform(post("/api/v1/transfers")
-                            .header("X-User-Id", sourceUser)
+                            .header("Authorization", bearerToken(sourceUser))
                             .header("Idempotency-Key",
                                     "opposite-stress-" + transferIndex + "-" + UUID.randomUUID())
                             .contentType(MediaType.APPLICATION_JSON)
@@ -854,7 +865,7 @@ class TransferIntegrationTest {
                 }
 
                 return mockMvc.perform(post("/api/v1/transfers")
-                                .header("X-User-Id", userA)
+                                .header("Authorization", bearerToken(userA))
                                 .header("Idempotency-Key", keyAToB)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(transferBody(walletA, walletB, 200)))
@@ -870,7 +881,7 @@ class TransferIntegrationTest {
                 }
 
                 return mockMvc.perform(post("/api/v1/transfers")
-                                .header("X-User-Id", userB)
+                                .header("Authorization", bearerToken(userB))
                                 .header("Idempotency-Key", keyBToA)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(transferBody(walletB, walletA, 200)))

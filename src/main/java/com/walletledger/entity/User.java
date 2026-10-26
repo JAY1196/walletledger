@@ -22,6 +22,9 @@ public class User {
     @Column(name = "email", nullable = false, length = 254, unique = true)
     private String email;
 
+    @Column(name = "password_hash", length = 60)
+    private String passwordHash;
+
     @Column(
             name = "created_at",
             nullable = false,
@@ -34,10 +37,19 @@ public class User {
         // Required by JPA.
     }
 
-    public User(UUID id, String name, String email) {
+    public User(UUID id, String name, String email, String passwordHash) {
         this.id = id;
         this.name = name;
         this.email = email;
+        this.passwordHash = passwordHash;
+    }
+
+    /**
+     * Compatibility constructor for internal/passwordless records.
+     * New registrations must use the constructor that accepts a hash.
+     */
+    public User(UUID id, String name, String email) {
+        this(id, name, email, null);
     }
 
     public UUID getId() {
@@ -50,6 +62,10 @@ public class User {
 
     public String getEmail() {
         return email;
+    }
+
+    public String getPasswordHash() {
+        return passwordHash;
     }
 
     public Instant getCreatedAt() {

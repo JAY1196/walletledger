@@ -74,6 +74,76 @@ public class TransactionLifecycleService {
         ));
     }
 
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void completeReversal(
+            Transaction original,
+            Transaction reversal,
+            Short responseStatus,
+            String responseBody,
+            String reason) {
+
+        Objects.requireNonNull(original, "Original transaction is required");
+        Objects.requireNonNull(reversal, "Reversal transaction is required");
+
+        if (original.getStatus() != TransactionStatus.COMPLETED) {
+            throw new IllegalStateException(
+                    "Only a completed original transaction can be reversed");
+        }
+
+        if (reversal.getStatus() != TransactionStatus.PENDING
+                || reversal.getType()
+                        != com.walletledger.entity.TransactionType.REVERSAL
+                || !original.getId().equals(reversal.getOriginalTxnId())
+                || original.getAmount() != reversal.getAmount()) {
+            throw new IllegalStateException(
+                    "The reversal transaction does not match its original");
+        }
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("original_transaction_id", original.getId());
+        payload.put("reversal_transaction_id", reversal.getId());
+        payload.put("amount_paise", reversal.getAmount());
+        payload.put("currency", "INR");
+        payload.put("status", "REVERSED");
+        payload.put("initiated_by", reversal.getInitiatedBy());
+        payload.put("timestamp", Instant.now().toString());
+        payload.put("event_version", 1);
+
+        final String eventPayload;
+        try {
+            eventPayload = objectMapper.writeValueAsString(payload);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException(
+                    "Could not serialize the transaction reversal event.", ex);
+        }
+
+        original.markReversed();
+        reversal.complete(responseStatus, responseBody);
+
+        transactionRepository.saveAndFlush(original);
+        transactionRepository.saveAndFlush(reversal);
+
+        auditRepository.saveAndFlush(new TransactionAudit(
+                original.getId(),
+                TransactionStatus.COMPLETED.name(),
+                TransactionStatus.REVERSED.name(),
+                reversal.getInitiatedBy(),
+                reason));
+
+        auditRepository.saveAndFlush(new TransactionAudit(
+                reversal.getId(),
+                TransactionStatus.PENDING.name(),
+                TransactionStatus.COMPLETED.name(),
+                reversal.getInitiatedBy(),
+                reason));
+
+        outboxRepository.saveAndFlush(new OutboxEvent(
+                "TRANSACTION",
+                original.getId(),
+                "TRANSACTION_REVERSED",
+                eventPayload));
+    }
+
     private String buildCompletionPayload(Transaction transaction) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("transaction_id", transaction.getId());

@@ -85,11 +85,11 @@ export const options = {
   },
 };
 
-function requestHeaders(userId, idempotencyKey) {
+function requestHeaders(token, idempotencyKey) {
   const headers = { 'Content-Type': 'application/json' };
 
-  if (userId) {
-    headers['X-User-Id'] = userId;
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
   }
 
   if (idempotencyKey) {
@@ -113,6 +113,7 @@ function createUser(suffix) {
     JSON.stringify({
       name: `k6 benchmark ${suffix}`,
       email: `k6-${runId}-${suffix}@example.test`,
+      password: 'ValidPassword123!',
     }),
     requestHeaders(null, null)
   );
@@ -121,45 +122,71 @@ function createUser(suffix) {
   return JSON.parse(response.body).id;
 }
 
-function createWallet(userId, suffix) {
+function loginUser(email, password, suffix) {
+  const response = http.post(
+    `${baseUrl}/api/v1/auth/login`,
+    JSON.stringify({ email, password }),
+    requestHeaders(null, null)
+  );
+
+  if (response.status !== 200) {
+    throw new Error(
+      `Login ${suffix} failed: HTTP ${response.status}; body=${response.body}`
+    );
+  }
+
+  const body = JSON.parse(response.body);
+
+  if (!body.accessToken || body.tokenType !== 'Bearer') {
+    throw new Error(`Login ${suffix} returned an invalid token response`);
+  }
+
+  return body.accessToken;
+}
+
+function createWallet(token, suffix) {
   const response = http.post(
     `${baseUrl}/api/v1/wallets`,
     null,
-    requestHeaders(userId, null)
+    requestHeaders(token, null)
   );
 
   requireCreated(response, `Create wallet ${suffix}`);
   return JSON.parse(response.body).id;
 }
 
-function fundWallet(userId, walletId, suffix) {
+function fundWallet(token, walletId, suffix) {
   const response = http.post(
     `${baseUrl}/api/v1/wallets/${walletId}/topup`,
     JSON.stringify({ amountPaise: initialFundingPaise }),
-    requestHeaders(userId, `k6-fund-${runId}-${suffix}`)
+    requestHeaders(token, `k6-fund-${runId}-${suffix}`)
   );
 
   requireCreated(response, `Fund wallet ${suffix}`);
 }
 
 export function setup() {
-  const users = [];
+  const tokens = [];
   const wallets = [];
+  const password = 'ValidPassword123!';
 
   for (let i = 0; i < walletCount; i++) {
     const suffix = `wallet-${i + 1}`;
-    const userId = createUser(suffix);
-    const walletId = createWallet(userId, suffix);
+    const email = `k6-${runId}-${suffix}@example.test`;
 
-    fundWallet(userId, walletId, suffix);
+    createUser(suffix);
+    const token = loginUser(email, password, suffix);
+    const walletId = createWallet(token, suffix);
 
-    users.push(userId);
+    fundWallet(token, walletId, suffix);
+
+    tokens.push(token);
     wallets.push(walletId);
   }
 
-  console.log(`Prepared ${walletCount} funded wallets for run ${runId}`);
+  console.log(`Prepared ${walletCount} authenticated, funded wallets for run ${runId}`);
 
-  return { users, wallets };
+  return { tokens, wallets };
 }
 
 function recordResponse(response) {
@@ -185,7 +212,7 @@ function recordResponse(response) {
 function transfer(data, sourceIndex, destinationIndex) {
   const sourceWalletId = data.wallets[sourceIndex];
   const destinationWalletId = data.wallets[destinationIndex];
-  const userId = data.users[sourceIndex];
+  const token = data.tokens[sourceIndex];
 
   const response = http.post(
     `${baseUrl}/api/v1/transfers`,
@@ -195,7 +222,7 @@ function transfer(data, sourceIndex, destinationIndex) {
       amountPaise: transferAmountPaise,
     }),
     requestHeaders(
-      userId,
+      token,
       `k6-transfer-${runId}-${__VU}-${__ITER}`
     )
   );

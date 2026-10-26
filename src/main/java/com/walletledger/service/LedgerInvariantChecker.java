@@ -84,9 +84,105 @@ public class LedgerInvariantChecker {
             }
         }
 
+        violations.addAll(findReversalViolations());
+
         return List.copyOf(violations);
     }
 
+
+    @Transactional(readOnly = true)
+    public List<String> findReversalViolations() {
+        List<String> violations = new ArrayList<>();
+        List<Transaction> transactions = transactionRepository.findAll();
+
+        for (Transaction original : transactions) {
+            List<Transaction> linked = transactionRepository
+                    .findByOriginalTxnId(original.getId());
+
+            List<Transaction> successfulReversals = linked.stream()
+                    .filter(t -> t.getType()
+                            == com.walletledger.entity.TransactionType.REVERSAL)
+                    .filter(t -> t.getStatus() == TransactionStatus.COMPLETED)
+                    .toList();
+
+            if (original.getStatus() == TransactionStatus.COMPLETED
+                    && !successfulReversals.isEmpty()) {
+                violations.add(original.getId()
+                        + ": completed reversal exists but original transaction is not REVERSED");
+            }
+            if (original.getStatus() == TransactionStatus.REVERSED) {
+                if (successfulReversals.size() != 1) {
+                    violations.add(original.getId()
+                            + ": REVERSED transaction must have exactly one completed reversal");
+                } else {
+                    Transaction reversal = successfulReversals.get(0);
+
+                    if (reversal.getAmount() != original.getAmount()) {
+                        violations.add(original.getId()
+                                + ": reversal amount does not match original transaction");
+                    }
+
+                    if (!original.getId().equals(reversal.getOriginalTxnId())) {
+                        violations.add(original.getId()
+                                + ": reversal points to the wrong original transaction");
+                    }
+
+                    List<LedgerEntry> originalEntries =
+                            ledgerEntryRepository.findByTransactionIdOrderByIdAsc(
+                                    original.getId());
+                    List<LedgerEntry> reversalEntries =
+                            ledgerEntryRepository.findByTransactionIdOrderByIdAsc(
+                                    reversal.getId());
+
+                    if (!areExactOpposites(originalEntries, reversalEntries)) {
+                        violations.add(original.getId()
+                                + ": reversal ledger entries are not exact opposites of the original");
+                    }
+                }
+            }
+
+            if (original.getType()
+                    == com.walletledger.entity.TransactionType.REVERSAL
+                    && !linked.isEmpty()) {
+                violations.add(original.getId()
+                        + ": a REVERSAL transaction cannot itself be reversed");
+            }
+        }
+
+        return List.copyOf(violations);
+    }
+
+    private boolean areExactOpposites(
+            List<LedgerEntry> originalEntries,
+            List<LedgerEntry> reversalEntries) {
+
+        if (originalEntries.size() < 2
+                || originalEntries.size() != reversalEntries.size()) {
+            return false;
+        }
+
+        List<String> expected = originalEntries.stream()
+                .map(entry -> entry.getWalletId() + "|"
+                        + opposite(entry.getDirection()) + "|"
+                        + entry.getAmount())
+                .sorted()
+                .toList();
+
+        List<String> actual = reversalEntries.stream()
+                .map(entry -> entry.getWalletId() + "|"
+                        + entry.getDirection() + "|"
+                        + entry.getAmount())
+                .sorted()
+                .toList();
+
+        return expected.equals(actual);
+    }
+
+    private LedgerEntryDirection opposite(LedgerEntryDirection direction) {
+        return direction == LedgerEntryDirection.DEBIT
+                ? LedgerEntryDirection.CREDIT
+                : LedgerEntryDirection.DEBIT;
+    }
     /**
      * Reconciles cached wallet balances against their complete ledger history.
      * Credits increase balances; debits decrease balances.

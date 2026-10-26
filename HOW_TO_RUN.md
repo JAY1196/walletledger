@@ -29,7 +29,7 @@ Set-Location walletledger
 Copy-Item .env.example .env
 ```
 
-Edit `.env` and replace every password placeholder with a strong, unique local password before starting the services. Do not commit or share your populated `.env` file.
+Edit `.env` and replace every password placeholder with a strong, unique local password. Set `WALLETLEDGER_SECURITY_JWT_SECRET` to a random Base64-encoded secret whose decoded value is at least 32 bytes. `WALLETLEDGER_SECURITY_JWT_EXPIRATION_SECONDS` defaults to `900` seconds (15 minutes). Do not commit or share your populated `.env` file or JWT secret.
 
 Build and start the application and its dependencies:
 
@@ -68,7 +68,7 @@ With Java 21 installed and Docker available for integration tests, run:
 .\mvnw.cmd clean verify
 ```
 
-The documented verification baseline is 97 tests across 21 test classes, with zero failures, errors, or skipped tests. Results on another machine may differ depending on its environment and resources.
+Historical checkpoints: v1.0 passed 97 tests; the isolated Phase 1 snapshot passed 112 tests. The full working-tree verification on 2026-10-25 passed 140 tests, with 0 failures, 0 errors, and 0 skipped (`BUILD SUCCESS`). Run the command again after future code changes. Results on another machine may differ depending on its environment and resources.
 
 ## Run the API locally outside Docker
 
@@ -141,3 +141,45 @@ Resolve any startup or connection errors before retrying the readiness check.
 ---
 
 **Security reminder:** Share the source code and `.env.example`, not your populated `.env`, passwords, tokens, or other private credentials.
+
+## Run k6 concurrency benchmarks
+
+Start the Docker Compose stack and confirm that the API readiness endpoint is healthy before running benchmarks. Install k6 separately if it is not already available.
+
+Run the hot-pair scenario from PowerShell:
+
+```powershell
+$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$runId = "hot_pair-$stamp"
+
+k6 run `
+  -e BASE_URL=http://localhost:8081 `
+  -e SCENARIO=hot_pair `
+  -e RUN_ID=$runId `
+  --summary-export ".\k6\hot_pair-$stamp.json" `
+  .\k6\concurrent-transfers.js
+
+Write-Host "k6 exit code: $LASTEXITCODE"
+```
+
+Run the wallet-pool scenario separately:
+
+```powershell
+$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$runId = "pool-$stamp"
+
+k6 run `
+  -e BASE_URL=http://localhost:8081 `
+  -e SCENARIO=pool `
+  -e RUN_ID=$runId `
+  --summary-export ".\k6\pool-$stamp.json" `
+  .\k6\concurrent-transfers.js
+
+Write-Host "k6 exit code: $LASTEXITCODE"
+```
+
+Use a unique `RUN_ID` for every run because the script creates users with run-specific email addresses. The summary-export path is also unique per run so an earlier JSON summary is not overwritten.
+
+The script configures thresholds for HTTP request failure rate below 1%, p95 HTTP request duration below 500 ms, and zero unexpected response counts. Check the k6 process exit code and the actual threshold results; do not assume that a benchmark passed based only on iteration counts or latency figures.
+
+The request metrics include setup requests such as user creation, login, wallet creation, and funding, in addition to transfer requests. Benchmark measurements are environment-specific. After each run, perform the project's SQL integrity checks and compare the InnoDB deadlock counter before and after if you need to verify database integrity and observed deadlocks.

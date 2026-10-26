@@ -2,6 +2,9 @@
 package com.walletledger;
 
 import com.walletledger.service.LedgerInvariantChecker;
+import com.walletledger.entity.User;
+import com.walletledger.repository.UserRepository;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
@@ -38,6 +41,12 @@ class UserRegistrationIntegrationTest {
     @Autowired
     private LedgerInvariantChecker ledgerInvariantChecker;
 
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
     @Test
     void registersUserWithoutUserIdHeader() throws Exception {
         String email = "registration-" + java.util.UUID.randomUUID()
@@ -46,7 +55,7 @@ class UserRegistrationIntegrationTest {
         mockMvc.perform(post("/api/v1/users")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"name":"Integration Test User","email":"%s"}
+                                {"name":"Integration Test User","email":"%s","password":"ValidPassword123!"}
                                 """.formatted(email)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").isNotEmpty())
@@ -55,13 +64,51 @@ class UserRegistrationIntegrationTest {
                 .andExpect(jsonPath("$.createdAt").isNotEmpty());
     }
 
+
+    @Test
+    void registrationStoresOnlyBcryptPasswordHash() throws Exception {
+        String email = "password-hash-" + java.util.UUID.randomUUID()
+                + "@walletledger.test";
+        String password = "ValidPassword123!";
+
+        String response = mockMvc.perform(post("/api/v1/users")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Password Hash Test","email":"%s","password":"%s"}
+                                """.formatted(email, password)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.password").doesNotExist())
+                .andExpect(jsonPath("$.passwordHash").doesNotExist())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        User savedUser = userRepository.findAll().stream()
+                .filter(user -> email.equals(user.getEmail()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(
+                        "Registered user was not persisted"));
+
+        String storedHash = savedUser.getPasswordHash();
+
+        assertTrue(storedHash != null && !storedHash.isBlank(),
+                "Password hash should be stored");
+        assertTrue(!password.equals(storedHash),
+                "Raw password must not be stored");
+        assertTrue(passwordEncoder.matches(password, storedHash),
+                "Stored hash should verify the original password");
+        assertTrue(!response.contains(password),
+                "Registration response must not contain the raw password");
+        assertTrue(!response.contains(storedHash),
+                "Registration response must not contain the password hash");
+    }
     @Test
     void duplicateEmailReturnsConflict() throws Exception {
         String email = "duplicate-" + java.util.UUID.randomUUID()
                 + "@walletledger.test";
 
         String requestBody = """
-                {"name":"Duplicate Test User","email":"%s"}
+                {"name":"Duplicate Test User","email":"%s","password":"ValidPassword123!"}
                 """.formatted(email);
 
         mockMvc.perform(post("/api/v1/users")
@@ -81,22 +128,22 @@ class UserRegistrationIntegrationTest {
         mockMvc.perform(post("/api/v1/users")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"name":"Invalid Email User","email":"not-an-email"}
+                                {"name":"Invalid Email User","email":"not-an-email","password":"ValidPassword123!"}
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
     }
 
     @Test
-    void malformedUserIdHeaderReturnsBadRequest() throws Exception {
-        mockMvc.perform(get("/api/v1/wallets/me")
-                        .header("X-User-Id", "not-a-valid-uuid"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
+    void malformedBearerTokenReturnsUnauthorized() throws Exception {
+        mockMvc.perform(get("/api/v1/wallets/00000000-0000-0000-0000-000000000001/balance")
+                        .header("Authorization", "Bearer not-a-valid-token"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
     }
     @Test
-    void protectedWalletEndpointRequiresUserIdHeader() throws Exception {
-        mockMvc.perform(get("/api/v1/wallets/me"))
+    void protectedWalletEndpointRequiresBearerToken() throws Exception {
+        mockMvc.perform(get("/api/v1/wallets/00000000-0000-0000-0000-000000000001/balance"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
     }
@@ -106,7 +153,7 @@ class UserRegistrationIntegrationTest {
         mockMvc.perform(post("/api/v1/users")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"name":"   ","email":"blank-name@walletledger.test"}
+                                {"name":"   ","email":"blank-name@walletledger.test","password":"ValidPassword123!"}
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
@@ -131,7 +178,7 @@ class UserRegistrationIntegrationTest {
         mockMvc.perform(post("/api/v1/users")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"name":"  Normalization User  ","email":"%s"}
+                                {"name":"  Normalization User  ","email":"%s","password":"ValidPassword123!"}
                                 """.formatted(email.toUpperCase(java.util.Locale.ROOT))))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.name").value("Normalization User"))
@@ -144,7 +191,7 @@ class UserRegistrationIntegrationTest {
                 + "@walletledger.test";
 
         String requestBody = """
-                {"name":"Concurrent Registration User","email":"%s"}
+                {"name":"Concurrent Registration User","email":"%s","password":"ValidPassword123!"}
                 """.formatted(email);
 
         int requestCount = 20;

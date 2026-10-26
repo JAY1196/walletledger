@@ -138,6 +138,14 @@ public class Transaction {
         this.responseBody = responseBody;
     }
 
+    public void markReversed() {
+        if (status != TransactionStatus.COMPLETED) {
+            throw new IllegalStateException(
+                    "Only a completed transaction can be marked reversed");
+        }
+        this.status = TransactionStatus.REVERSED;
+    }
+
     public void markReversed(Short responseStatus, String responseBody) {
         if (status != TransactionStatus.COMPLETED) {
             throw new IllegalStateException(

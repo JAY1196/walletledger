@@ -185,21 +185,29 @@ can report Redis failure while readiness remains UP.
 
 Implementation status (2026-10-18): the rate limiter and its fail-open behavior remain deferred unless documented in a later update.
 
-## 14. Development identity and API errors
+## 14. JWT authentication and API errors
 
-**Decision:** Use X-User-Id through a HandlerInterceptor during development.
+**Decision:** Use signed JWT bearer access tokens for protected API requests.
 
-**Why:** It provides a small identity boundary without adding JWT scope
-to the foundation module.
+Registration is public at `POST /api/v1/users` and requires a password.
+`POST /api/v1/auth/login` verifies credentials and returns an access token.
+Protected `/api/**` requests require `Authorization: Bearer <token>`.
+Request identity is derived from the validated token subject, not from a
+caller-supplied `X-User-Id` header.
 
-**Security limitation:** The header is spoofable and is not authentication.
-Replace it with verified JWT identity before production use.
+JWTs use HS256. The signing secret is configured through
+`WALLETLEDGER_SECURITY_JWT_SECRET`; the application validates that its
+Base64-decoded value contains at least 32 bytes. The default access-token
+lifetime is 900 seconds (15 minutes).
+
+**Security limitation:** JWT authentication is implemented, but production
+readiness still requires security review, secure secret management and
+rotation, TLS enforcement, rate limiting, monitoring, and deployment controls.
 
 API errors use RFC 9457 ProblemDetail and stable codes. Unexpected errors
 return a reference ID and do not expose stack traces to clients.
 Unexpected database constraint failures are treated as bugs, not blindly
 translated into business conflicts.
-
 ## 15. Test strategy and Windows Surefire workaround
 
 **Decision:** Test database constraints against disposable MySQL 8.4
@@ -229,7 +237,7 @@ Verified on 2026-10-12 (historical Module 1 baseline):
 - System bank user and wallet were seeded.
 - Application database permissions were checked.
 - APP-user DROP and TRUNCATE were denied in a temporary-table probe.
-- Swagger's X-User-Id authorization scheme was verified.
+- Historical Module 1 verification used the X-User-Id development identity scheme; the later Phase 2 implementation replaced it with JWT bearer authentication.
 - HTTP 401, 400, and 500 error formats were verified.
 - Actuator overall health, liveness, and readiness returned UP.
 - Historical Module 1 checkpoint: automated Maven suite passed 9 tests, with zero failures and zero errors.
@@ -243,8 +251,9 @@ This section records scope boundaries; it is not a claim that every item was com
 - **Verified:** Lock ordering through `WalletLockOrder`, its production call sites, and the parity test.
 - **Verified:** Concurrent wallet creation and same-email registration race tests.
 - **Verified:** The 2,000 opposite-direction transfer stress test and local k6 benchmark scenarios.
-- **Not implemented:** Transaction reversals and customer statement APIs.
-- **Open:** Authentication and authorization hardening, outbox publishing, rate limiting, and production deployment controls.
+- **Implemented in Phase 1:** Transaction reversal posting and API. Customer statement APIs remain unimplemented.
+- **Implemented in Phase 2:** Password-based login and JWT bearer authentication for protected API requests.
+- **Open:** Production authentication/authorization hardening, outbox publishing, rate limiting, and production deployment controls.
 - **Deferred by scope:** Fraud detection; retain the outbox for possible future integration, but do not implement fraud features in this project phase.
 
 ### Historical Module 2 implementation record
@@ -254,7 +263,7 @@ These details preserve the original users-and-wallets milestone. They are histor
 - **Registration:** `POST /api/v1/users` is public. Names are trimmed; emails are trimmed and normalized to lowercase. Application-generated UUIDs identify users, while database constraint `uq_users_email` enforces email uniqueness. Duplicate emails return `409 CONFLICT`; the creation timestamp is database-generated.
 - **Wallet creation:** `POST /api/v1/wallets` creates an INR wallet with a zero initial balance. Application-generated UUIDs identify wallets, and `uq_wallets_user_currency` enforces one wallet per user and currency. Creating a wallet does not move money.
 - **Money representation:** Wallet balances are stored as `BIGINT` paise and exposed through `balancePaise`, avoiding floating-point monetary arithmetic.
-- **Ownership:** `GET /api/v1/wallets/{id}/balance` is owner-scoped. A wallet not owned by the caller returns `404 NOT_FOUND`. Protected `/api/**` endpoints require a valid `X-User-Id` UUID; this is a development identity mechanism, not production authentication.
+- **Ownership (historical Module 2 behavior):** `GET /api/v1/wallets/{id}/balance` is owner-scoped. A wallet not owned by the caller returns `404 NOT_FOUND`. At that historical checkpoint, protected endpoints used the development-only `X-User-Id` UUID header; Phase 2 subsequently replaced this with JWT bearer authentication.
 - **Errors:** Invalid request data returns `400 BAD_REQUEST`; missing identity on protected endpoints returns `401 UNAUTHENTICATED`; duplicate email or wallet creation returns `409 CONFLICT`. Unexpected errors are handled by the global exception handler.
 - **Schema and tests:** Flyway V1/V2 were retained unchanged. The historical full-suite checkpoints were 18 passing tests on 15 October 2026 and 46 passing tests on 18 October 2026. A focused idempotency-mismatch test confirmed that reusing a key with a different amount returns `409 CONFLICT` without moving money a second time.
 - **Concurrency follow-up:** The original Module 2 notes had not yet confirmed concurrent wallet-creation handling. Later project verification recorded concurrent wallet-creation and same-email registration race tests; see the current verification sections below.
@@ -280,11 +289,12 @@ These test results establish the behaviors covered by the current suite; they do
 
 The following are **Open**; they are not represented as completed:
 
-- **Open:** Replace development identity handling with authenticated identity and enforce authorization.
+- **Implemented in Phase 2:** JWT bearer authentication and password-based login.
+- **Open:** Complete production security hardening and review authorization coverage.
 - **Open:** Implement and operate the transactional outbox publisher.
 - **Open:** Add API rate limiting, production monitoring, and deployment controls.
 - **Open:** Rerun k6 scenarios against the packaged Docker application in a dedicated environment.
-- **Not implemented:** Transaction reversal and customer statement APIs.
+- **Implemented in Phase 1:** Transaction reversal posting and API. Customer statement APIs remain unimplemented.
 - **Deferred:** Fraud detection remains out of scope. Do not build fraud features as part of this work.
 
 **Migration safeguard:** Do not edit already-applied Flyway V1/V2 migrations to change the existing schema. Use a new versioned migration for future schema changes.
@@ -305,9 +315,9 @@ The existing tests and local benchmarks do not establish production readiness.
 - Database protections reject updates and deletes against append-only ledger and audit records.
 - The invariant checker detects integrity problems including completed transactions without the expected ledger entries and inconsistent debit/credit or transaction totals. The later verification also covers cached-wallet-balance reconciliation and the global wallet-balance sum.
 
-These are implementation and test claims, not a guarantee of production readiness. Reversal posting and reversal APIs remain unimplemented.
+These are implementation and test claims, not a guarantee of production readiness. Phase 1 transaction reversals are implemented. On 2026-10-25, the isolated Phase 1 snapshot passed 112 tests and the combined working-tree run passed 113 tests; both had 0 failures, 0 errors, and 0 skipped.
 
-The ledger core and money-movement integration have progressed beyond the earlier Module 3 snapshot. The latest recorded test baseline is 97 tests across 21 classes, with zero failures, errors, or skipped tests.
+The ledger core and money-movement integration have progressed beyond the earlier Module 3 snapshot. Historical v1.0 baseline: 97 tests across 21 classes. The isolated Phase 1 snapshot later passed 112 tests; the combined working-tree run passed 113 tests. Both later runs reported zero failures, errors, and skipped tests.
 
 Verified behavior includes:
 
@@ -318,7 +328,7 @@ Verified behavior includes:
 - A 2,000-transfer opposite-direction stress test.
 - A controlled real-MySQL 1213 deadlock test proving bounded retry recovery.
 
-**Not implemented:** Reversal posting and reversal APIs.
+**Implemented in Phase 1:** Reversal posting and reversal APIs. The isolated Phase 1 snapshot passed 112 tests; the combined working-tree run passed 113 tests, with 0 failures, 0 errors, and 0 skipped in both runs.
 
 ## 21. Earlier combined benchmark and integrity run (2026-10-23)
 
@@ -469,3 +479,70 @@ The saved k6 JSON summaries mark all five configured threshold flags as `false`.
 - These local results do not demonstrate production capacity or production readiness.
 - The benchmark was not run against the packaged Docker application.
 - Fraud detection remains out of scope; the outbox is retained for future integration.
+
+
+## 23. Phase 1 transaction reversals
+
+**Scope:** Reverse an eligible completed top-up, withdrawal, or transfer. The original transaction's initiator must request the reversal. Reversal-of-reversal is rejected.
+
+**Atomicity:** The original transaction state change, reversal transaction, balanced opposite ledger entries, wallet balance changes, audit records, idempotency response, and `TRANSACTION_REVERSED` outbox event participate in the database transaction. A failure must roll back the complete operation.
+
+**Idempotency and concurrency:** Repeating the same logical request with the same idempotency key replays its stored response. Reusing a key for a different request conflicts. The database uniqueness constraint and locking protect against multiple successful reversals of the same original transaction.
+
+**Integrity:** The invariant checker verifies transaction-level ledger balance, wallet cached balances against ledger entries, global wallet balance, and reversal relationships. Reversal-specific checks detect lifecycle mismatches and invalid reversal chains.
+
+**Focused verification recorded:** `TransactionReversalIntegrationTest` passed 11 tests, and `LedgerInvariantCheckerIntegrationTest` passed 14 tests in the reported focused runs. These are focused test results, not the final full-suite result.
+
+**Earlier verification checkpoints:** The combined working-tree run passed 113 tests, and the isolated Phase 1 snapshot passed 112 tests. **Latest full working-tree verification (2026-10-25):** 140 tests, 0 failures, 0 errors, and 0 skipped (`BUILD SUCCESS`), including Phase 2 JWT authentication tests.
+
+## 24. v1.1 full-suite verification (2026-10-25)
+
+Command: `.\mvnw.cmd clean verify`
+
+Result: **BUILD SUCCESS**
+
+- Tests run: 113
+- Failures: 0
+- Errors: 0
+- Skipped: 0
+- Total time: 5 minutes 48 seconds
+
+This verifies the current v1.1 code and tests in the reported local environment. It does not establish production readiness or guarantee identical results in other environments.
+## 25. v1.1 benchmark reruns and integrity verification (2026-10-26)
+
+Two k6 scenarios were rerun against the Docker Compose application.
+
+### Hot-pair scenario
+
+- Run ID: `hot_pair-20261026-234434`
+- Workload: 5 constant virtual users for 30 seconds, concentrating transfers on two wallets.
+- Completed iterations: 1,118.
+- HTTP request rate: 34.50 requests/second.
+- HTTP request duration: p90 70.86 ms, p95 87.48 ms, p99 113.56 ms.
+- HTTP request failures: 0%.
+- Unexpected 4xx, 5xx, and other responses: 0.
+- k6 process exit code: 0.
+- InnoDB deadlock counter: 0 before and 0 after.
+
+### Wallet-pool scenario
+
+- Run ID: `pool-20261026-234512`
+- Workload: ramping virtual users, up to 25, distributing transfers across ten wallets.
+- Completed iterations: 5,736.
+- HTTP request rate: 56.51 requests/second.
+- HTTP request duration: p90 114.82 ms, p95 197.81 ms, p99 422.21 ms.
+- HTTP request failures: 0%.
+- Unexpected 4xx, 5xx, and other responses: 0.
+- k6 process exit code: 0.
+- InnoDB deadlock counter: 0 before and 0 after.
+
+### Integrity verification after reruns
+
+All four SQL checks returned zero violations:
+
+1. Transaction-to-ledger consistency.
+2. Cached wallet balances compared with ledger sums.
+3. Negative USER wallet balances.
+4. Global wallet balance sum, which was zero.
+
+The results are local measurements from one machine with the application, database, and load generator sharing the same host. They are not production capacity guarantees. The k6 HTTP request metrics include setup requests as well as transfer requests; completed iterations count executions of the transfer iteration function.

@@ -4,13 +4,14 @@ import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.security.SecurityScheme;
+
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
 public class OpenApiConfig {
 
-    private static final String USER_ID_SCHEME = "UserIdHeader";
+    private static final String BEARER_SCHEME = "BearerAuth";
 
     @Bean
     public OpenAPI walletLedgerOpenAPI() {
@@ -20,17 +21,19 @@ public class OpenApiConfig {
                         .version("v1")
                         .description(
                                 "WalletLedger REST API. "
-                                + "Development identity uses the X-User-Id header."
+                                + "Protected endpoints require a valid JWT "
+                                + "in the Authorization Bearer header."
                         ))
                 .components(new Components()
                         .addSecuritySchemes(
-                                USER_ID_SCHEME,
+                                BEARER_SCHEME,
                                 new SecurityScheme()
-                                        .type(SecurityScheme.Type.APIKEY)
-                                        .in(SecurityScheme.In.HEADER)
-                                        .name("X-User-Id")
+                                        .type(SecurityScheme.Type.HTTP)
+                                        .scheme("bearer")
+                                        .bearerFormat("JWT")
                                         .description(
-                                                "Development only: enter a UUID."
+                                                "Enter the access token returned "
+                                                + "by POST /api/v1/auth/login."
                                         )
                         ));
     }

@@ -2,6 +2,7 @@ package com.walletledger;
 
 import org.junit.jupiter.api.Test;
 import com.walletledger.service.LedgerInvariantChecker;
+import com.walletledger.service.JwtService;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -38,13 +39,20 @@ class WalletIntegrationTest {
     @Autowired
     private LedgerInvariantChecker ledgerInvariantChecker;
 
+    @Autowired
+    private JwtService jwtService;
+
+    private String bearerToken(String userId) {
+        return "Bearer " + jwtService.generateToken(UUID.fromString(userId));
+    }
+
     private String registerUser() throws Exception {
         String email = "wallet-" + UUID.randomUUID() + "@walletledger.test";
 
         String response = mockMvc.perform(post("/api/v1/users")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"name":"Wallet Test User","email":"%s"}
+                                {"name":"Wallet Test User","email":"%s","password":"ValidPassword123!"}
                                 """.formatted(email)))
                 .andExpect(status().isCreated())
                 .andReturn()
@@ -63,7 +71,7 @@ class WalletIntegrationTest {
         String userId = registerUser();
 
         mockMvc.perform(post("/api/v1/wallets")
-                        .header("X-User-Id", userId))
+                        .header("Authorization", bearerToken(userId)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").isNotEmpty())
                 .andExpect(jsonPath("$.userId").value(userId))
@@ -77,11 +85,11 @@ class WalletIntegrationTest {
         String userId = registerUser();
 
         mockMvc.perform(post("/api/v1/wallets")
-                        .header("X-User-Id", userId))
+                        .header("Authorization", bearerToken(userId)))
                 .andExpect(status().isCreated());
 
         mockMvc.perform(post("/api/v1/wallets")
-                        .header("X-User-Id", userId))
+                        .header("Authorization", bearerToken(userId)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("CONFLICT"));
     }
@@ -91,7 +99,7 @@ class WalletIntegrationTest {
         String userId = registerUser();
 
         String response = mockMvc.perform(post("/api/v1/wallets")
-                        .header("X-User-Id", userId))
+                        .header("Authorization", bearerToken(userId)))
                 .andExpect(status().isCreated())
                 .andReturn()
                 .getResponse()
@@ -104,7 +112,7 @@ class WalletIntegrationTest {
                 .asText();
 
         mockMvc.perform(get("/api/v1/wallets/{id}/balance", walletId)
-                        .header("X-User-Id", userId))
+                        .header("Authorization", bearerToken(userId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(walletId))
                 .andExpect(jsonPath("$.balancePaise").value(0));
@@ -116,7 +124,7 @@ class WalletIntegrationTest {
         String anotherUserId = registerUser();
 
         String response = mockMvc.perform(post("/api/v1/wallets")
-                        .header("X-User-Id", ownerId))
+                        .header("Authorization", bearerToken(ownerId)))
                 .andExpect(status().isCreated())
                 .andReturn()
                 .getResponse()
@@ -129,7 +137,7 @@ class WalletIntegrationTest {
                 .asText();
 
         mockMvc.perform(get("/api/v1/wallets/{id}/balance", walletId)
-                        .header("X-User-Id", anotherUserId))
+                        .header("Authorization", bearerToken(anotherUserId)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("NOT_FOUND"));
     }
@@ -138,16 +146,16 @@ class WalletIntegrationTest {
         String unknownUserId = UUID.randomUUID().toString();
 
         mockMvc.perform(post("/api/v1/wallets")
-                        .header("X-User-Id", unknownUserId))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+                        .header("Authorization", bearerToken(unknownUserId)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
     }
     @Test
     void systemBankUserCannotCreateUserWallet() throws Exception {
         String systemUserId = "00000000-0000-0000-0000-000000000001";
 
         mockMvc.perform(post("/api/v1/wallets")
-                        .header("X-User-Id", systemUserId))
+                        .header("Authorization", bearerToken(systemUserId)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("FORBIDDEN"));
     }
@@ -175,7 +183,7 @@ class WalletIntegrationTest {
 
                     return mockMvc.perform(
                                     post("/api/v1/wallets")
-                                            .header("X-User-Id", userId)
+                                            .header("Authorization", bearerToken(userId))
                             )
                             .andReturn()
                             .getResponse()
