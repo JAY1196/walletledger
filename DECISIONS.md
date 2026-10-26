@@ -508,3 +508,41 @@ Result: **BUILD SUCCESS**
 - Total time: 5 minutes 48 seconds
 
 This verifies the current v1.1 code and tests in the reported local environment. It does not establish production readiness or guarantee identical results in other environments.
+## 25. v1.1 benchmark reruns and integrity verification (2026-10-26)
+
+Two k6 scenarios were rerun against the Docker Compose application.
+
+### Hot-pair scenario
+
+- Run ID: `hot_pair-20261026-234434`
+- Workload: 5 constant virtual users for 30 seconds, concentrating transfers on two wallets.
+- Completed iterations: 1,118.
+- HTTP request rate: 34.50 requests/second.
+- HTTP request duration: p90 70.86 ms, p95 87.48 ms, p99 113.56 ms.
+- HTTP request failures: 0%.
+- Unexpected 4xx, 5xx, and other responses: 0.
+- k6 process exit code: 0.
+- InnoDB deadlock counter: 0 before and 0 after.
+
+### Wallet-pool scenario
+
+- Run ID: `pool-20261026-234512`
+- Workload: ramping virtual users, up to 25, distributing transfers across ten wallets.
+- Completed iterations: 5,736.
+- HTTP request rate: 56.51 requests/second.
+- HTTP request duration: p90 114.82 ms, p95 197.81 ms, p99 422.21 ms.
+- HTTP request failures: 0%.
+- Unexpected 4xx, 5xx, and other responses: 0.
+- k6 process exit code: 0.
+- InnoDB deadlock counter: 0 before and 0 after.
+
+### Integrity verification after reruns
+
+All four SQL checks returned zero violations:
+
+1. Transaction-to-ledger consistency.
+2. Cached wallet balances compared with ledger sums.
+3. Negative USER wallet balances.
+4. Global wallet balance sum, which was zero.
+
+The results are local measurements from one machine with the application, database, and load generator sharing the same host. They are not production capacity guarantees. The k6 HTTP request metrics include setup requests as well as transfer requests; completed iterations count executions of the transfer iteration function.

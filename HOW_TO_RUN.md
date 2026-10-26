@@ -141,3 +141,45 @@ Resolve any startup or connection errors before retrying the readiness check.
 ---
 
 **Security reminder:** Share the source code and `.env.example`, not your populated `.env`, passwords, tokens, or other private credentials.
+
+## Run k6 concurrency benchmarks
+
+Start the Docker Compose stack and confirm that the API readiness endpoint is healthy before running benchmarks. Install k6 separately if it is not already available.
+
+Run the hot-pair scenario from PowerShell:
+
+```powershell
+$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$runId = "hot_pair-$stamp"
+
+k6 run `
+  -e BASE_URL=http://localhost:8081 `
+  -e SCENARIO=hot_pair `
+  -e RUN_ID=$runId `
+  --summary-export ".\k6\hot_pair-$stamp.json" `
+  .\k6\concurrent-transfers.js
+
+Write-Host "k6 exit code: $LASTEXITCODE"
+```
+
+Run the wallet-pool scenario separately:
+
+```powershell
+$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$runId = "pool-$stamp"
+
+k6 run `
+  -e BASE_URL=http://localhost:8081 `
+  -e SCENARIO=pool `
+  -e RUN_ID=$runId `
+  --summary-export ".\k6\pool-$stamp.json" `
+  .\k6\concurrent-transfers.js
+
+Write-Host "k6 exit code: $LASTEXITCODE"
+```
+
+Use a unique `RUN_ID` for every run because the script creates users with run-specific email addresses. The summary-export path is also unique per run so an earlier JSON summary is not overwritten.
+
+The script configures thresholds for HTTP request failure rate below 1%, p95 HTTP request duration below 500 ms, and zero unexpected response counts. Check the k6 process exit code and the actual threshold results; do not assume that a benchmark passed based only on iteration counts or latency figures.
+
+The request metrics include setup requests such as user creation, login, wallet creation, and funding, in addition to transfer requests. Benchmark measurements are environment-specific. After each run, perform the project's SQL integrity checks and compare the InnoDB deadlock counter before and after if you need to verify database integrity and observed deadlocks.

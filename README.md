@@ -314,7 +314,7 @@ These tests establish evidence for the implemented cases; they do not prove corr
 
 ## Benchmark results
 
-Both benchmarks ran on one laptop, with the application, k6 and MySQL sharing the same machine. The application was launched with `.\mvnw.cmd spring-boot:run`, not from a packaged JAR.
+Both benchmarks ran on one laptop, with the application and MySQL running through Docker Compose and k6 running from the host. These are local development measurements, not production capacity guarantees.
 
 ### Test environment
 
@@ -325,28 +325,44 @@ Both benchmarks ran on one laptop, with the application, k6 and MySQL sharing th
 | Storage | NVMe SSD |
 | Hikari connection pool | 10 |
 | Database | MySQL 8.4 |
-| Application launch | Maven `spring-boot:run` |
+| Application launch | Docker Compose |
+| Benchmark date | 2026-10-26 |
 
-### Results
+### Latest rerun results
 
 | Metric | Hot pair | Wallet pool |
 |---|---:|---:|
 | Workload | 2 wallets | 10 wallets |
-| Load pattern | 5 constant VUs, 30 seconds | 5 to 10 to 25 VUs, 100 seconds |
-| Transfers | 1,088 | 5,093 |
-| Throughput | 35.75 req/s | 50.88 req/s |
-| p50 latency | 30.4 ms | 47.5 ms |
-| p90 latency | 56.3 ms | 176.7 ms |
-| p95 latency | 76.8 ms | 222.7 ms |
-| p99 latency | 118.6 ms | 299.7 ms |
-| Request failures reported by k6 | 0% | 0% |
+| Load pattern | 5 constant VUs, 30 seconds | Ramp up to 25 VUs over 100 seconds |
+| Completed iterations | 1,118 | 5,736 |
+| HTTP request rate | 34.50 req/s | 56.51 req/s |
+| HTTP request failures | 0% | 0% |
+| HTTP request duration p90 | 70.86 ms | 114.82 ms |
+| HTTP request duration p95 | 87.48 ms | 197.81 ms |
+| HTTP request duration p99 | 113.56 ms | 422.21 ms |
+| Unexpected 4xx responses | 0 | 0 |
+| Unexpected 5xx responses | 0 | 0 |
+| Unexpected other responses | 0 | 0 |
 | k6 process exit code | 0 | 0 |
-| InnoDB deadlock counter increase | 0 | 0 |
-| SQL integrity checks after run | 0 violations | 0 violations |
+| InnoDB deadlock counter | 0 -> 0 | 0 -> 0 |
+| SQL integrity checks | 0 violations | 0 violations |
 
-The hot-pair scenario concentrates traffic on two wallets and exercises contention. The wallet-pool scenario distributes work over more wallets and increases virtual users over time.
+The hot-pair scenario concentrates transfers on two wallets to exercise contention. The wallet-pool scenario distributes transfers across ten wallets and ramps virtual users up to 25.
 
-**Benchmark interpretation:** Both k6 processes exited with code 0. In this k6 summary format, the saved threshold flag `false` indicates that the threshold passed, as confirmed by a diagnostic using an intentionally impossible threshold. The reported HTTP failure rate was 0%, unexpected response counts were zero, and p95 latency was below 500 ms in both runs. These are local development measurements, not production capacity guarantees.
+**Threshold interpretation:** The k6 script defines thresholds for HTTP request failure rate, p95 request duration below 500 ms, and zero unexpected response counts. Both reported runs exited with code 0; their reported p95 values were below 500 ms, and the unexpected response counts were zero. Do not interpret a saved threshold flag in isolation as evidence that a threshold passed.
+
+The latency percentiles and HTTP request rate come from k6's HTTP request metrics, which include setup requests as well as transfer requests. Completed iterations represent executions of the transfer iteration function. These results are specific to this local machine and workload.
+
+### Post-benchmark integrity checks
+
+After both reruns, the four SQL checks reported:
+
+- Transaction-to-ledger violations: 0
+- Wallet cached-balance versus ledger mismatches: 0
+- Negative USER wallet balances: 0
+- Global sum of wallet balances: 0 paise
+
+The InnoDB deadlock counter also remained at zero during each measured run. These checks support the observed results but do not prove correctness under every possible workload or failure condition.
 
 ## Security and operational limitations
 
