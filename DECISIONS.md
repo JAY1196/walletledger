@@ -1,6 +1,6 @@
 # WalletLedger - Architecture Decisions
 
-Last updated: 2026-10-24
+Last updated: 2026-10-27
 Scope: Architecture decisions, verified implementation status, concurrency tests, and local benchmark evidence through Module 4C
 
 ## 1. Java and Spring Boot
@@ -546,3 +546,13 @@ All four SQL checks returned zero violations:
 4. Global wallet balance sum, which was zero.
 
 The results are local measurements from one machine with the application, database, and load generator sharing the same host. They are not production capacity guarantees. The k6 HTTP request metrics include setup requests as well as transfer requests; completed iterations count executions of the transfer iteration function.
+
+## 26. Continuous integration
+
+**Decision:** Use GitHub Actions to run Maven verification on pushes to `main` and pull requests targeting `main`.
+
+**Configuration:** GitHub-hosted Ubuntu runner, Temurin Java 21, Maven dependency caching, and `./mvnw -B verify`. Docker is required because integration tests use Testcontainers with MySQL and Redis. Surefire XML reports are uploaded as an artifact even if the verification job fails.
+
+**Secrets:** CI supplies only a test JWT secret. It must not depend on the developer's local `.env` or production credentials.
+
+**Evidence boundary:** A successful local Maven run does not prove the GitHub Actions workflow has passed. Record the first successful Actions run separately after pushing the workflow branch and opening a pull request.

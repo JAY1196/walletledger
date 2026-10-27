@@ -1,5 +1,7 @@
 # WalletLedger
 
+[![CI](https://github.com/JAY1196/walletledger/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/JAY1196/walletledger/actions/workflows/ci.yml)
+
 ## Highlights
 
 - Phase 1 transaction reversals are implemented. Isolated Phase 1 verification passed: 112 tests, 0 failures, 0 errors, 0 skipped. The combined working-tree run passed 113 tests.
@@ -74,6 +76,9 @@ The exact transaction and locking behavior is implemented in the application ser
 - k6 for concurrency and performance experiments
 - OpenAPI / Swagger UI
 
+## Continuous integration
+
+GitHub Actions runs `./mvnw -B verify` on pushes to `main` and pull requests targeting `main`, using Temurin Java 21 and Maven dependency caching. The job requires Docker for Testcontainers integration tests and uploads Surefire XML reports as an artifact, including when verification fails. The JWT value used by CI is test-only; production credentials must never be committed.
 ## Key design decisions
 
 - Store monetary amounts as integer paise rather than floating-point values.
@@ -313,6 +318,9 @@ Concurrency and integrity evidence includes:
 These tests establish evidence for the implemented cases; they do not prove correctness under every possible production workload or infrastructure failure.
 
 ## Benchmark results
+
+Benchmark conditions (26 October 2026): These local measurements used an Intel Core i5-9300H (4 cores/8 threads), 15.9 GB RAM, and NVMe storage. The application and MySQL ran through Docker Compose, while k6 ran on the same laptop. The application Hikari pool maximum was 10. The hot-pair scenario used 5 constant VUs for 30 seconds against two wallets. The wallet-pool scenario used 10 wallets and ramped through 5 VUs for 30 seconds, 10 VUs for 30 seconds, 25 VUs for 30 seconds, then ramped down to 0 over 10 seconds. Transfers used 1 paise; setup funded each generated wallet with INR 10,000. These are workload-specific local measurements, not production-capacity guarantees. HTTP request metrics include setup requests, whereas iteration counts represent transfer-loop iterations.
+
 
 Both benchmarks ran on one laptop, with the application and MySQL running through Docker Compose and k6 running from the host. These are local development measurements, not production capacity guarantees.
 

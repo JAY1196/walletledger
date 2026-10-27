@@ -3,6 +3,8 @@ package com.walletledger;
 import com.walletledger.config.JwtConfig;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.context.annotation.AnnotationConfigUtils;
+import org.springframework.context.support.PropertySourcesPlaceholderConfigurer;
 import org.springframework.core.env.MapPropertySource;
 
 import java.util.Map;
@@ -41,6 +43,8 @@ class JwtConfigStartupTest {
                 new AnnotationConfigApplicationContext();
 
         try {
+            AnnotationConfigUtils.registerAnnotationConfigProcessors(context);
+            context.addBeanFactoryPostProcessor(new PropertySourcesPlaceholderConfigurer());
             context.register(JwtConfig.class);
 
             assertThrows(RuntimeException.class, context::refresh);
