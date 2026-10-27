@@ -1,6 +1,6 @@
 # WalletLedger - Architecture Decisions
 
-Last updated: 2026-10-27
+Last updated: 2026-10-28
 Scope: Architecture decisions, verified implementation status, concurrency tests, and local benchmark evidence through Module 4C
 
 ## 1. Java and Spring Boot
@@ -493,7 +493,7 @@ The saved k6 JSON summaries mark all five configured threshold flags as `false`.
 
 **Focused verification recorded:** `TransactionReversalIntegrationTest` passed 11 tests, and `LedgerInvariantCheckerIntegrationTest` passed 14 tests in the reported focused runs. These are focused test results, not the final full-suite result.
 
-**Earlier verification checkpoints:** The combined working-tree run passed 113 tests, and the isolated Phase 1 snapshot passed 112 tests. **Latest full working-tree verification (2026-10-25):** 140 tests, 0 failures, 0 errors, and 0 skipped (`BUILD SUCCESS`), including Phase 2 JWT authentication tests.
+**Earlier verification checkpoints:** The combined working-tree run passed 113 tests, and the isolated Phase 1 snapshot passed 112 tests. **Latest full clean verification (2026-10-28, commit a3f2b29):** 149 tests, 0 failures, 0 errors, and 0 skipped (`BUILD SUCCESS`); 30 Surefire XML reports were generated, including Phase 2 JWT authentication tests.
 
 ## 24. v1.1 full-suite verification (2026-10-25)
 
@@ -555,4 +555,4 @@ The results are local measurements from one machine with the application, databa
 
 **Secrets:** CI supplies only a test JWT secret. It must not depend on the developer's local `.env` or production credentials.
 
-**Evidence boundary:** A successful local Maven run does not prove the GitHub Actions workflow has passed. Record the first successful Actions run separately after pushing the workflow branch and opening a pull request.
+**CI evidence:** The initial GitHub Actions check passed on PR #1 before it was merged. The separate local clean verification recorded on 2026-10-28 at commit a3f2b29 passed 149 tests, with 0 failures, 0 errors, and 0 skipped. These are distinct pieces of evidence; do not infer a post-merge Actions result from the local run.

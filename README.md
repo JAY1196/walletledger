@@ -6,7 +6,7 @@
 
 - Phase 1 transaction reversals are implemented. Isolated Phase 1 verification passed: 112 tests, 0 failures, 0 errors, 0 skipped. The combined working-tree run passed 113 tests.
 - 2,000 opposite-direction concurrent transfers tested, plus a forced real-MySQL error 1213 deadlock recovery test.
-- Two per-scenario k6 runs completed 6,181 iterations up to 25 VUs, with 0% reported HTTP failures and zero integrity violations afterward.
+- The latest two per-scenario k6 runs completed 6,854 iterations up to 25 VUs, with 0% reported HTTP failures and zero integrity violations afterward.
 - Double-entry ledger postings, transaction audit records, and outbox events are written within the same transaction.
 
 A production-style REST backend for wallet operations, built with Java 21, Spring Boot, and MySQL. The project focuses on correct money movement under retries and concurrency, with an auditable ledger and database integrity checks.
@@ -151,7 +151,7 @@ Start the required MySQL and Redis services using your configured local setup, t
 .\mvnw.cmd clean verify
 ```
 
-The 97-test result is a historical v1.0 checkpoint. An earlier combined working-tree checkpoint passed 113 tests, and the isolated Phase 1 snapshot passed 112 tests. The latest full working-tree verification on 2026-10-25 passed 140 tests, 0 failures, 0 errors, and 0 skipped. The project retains its Surefire `forkCount=0` workaround because removing it caused a fork-startup failure in this environment.
+The 97-test result is a historical v1.0 checkpoint. An earlier combined working-tree checkpoint passed 113 tests, and the isolated Phase 1 snapshot passed 112 tests. The latest full clean verification on 2026-10-28 at commit a3f2b29 passed 149 tests, with 0 failures, 0 errors, and 0 skipped; 30 Surefire XML reports were generated. The project retains its Surefire `forkCount=0` workaround because removing it caused a fork-startup failure in this environment.
 
 To start Spring Boot from Maven:
 
@@ -298,8 +298,8 @@ Latest verified Maven build:
 
 | Result | Count |
 |---|---:|
-| Test classes | 27 |
-| Tests run | 140 |
+| Surefire XML reports | 30 |
+| Tests run | 149 |
 | Failures | 0 |
 | Errors | 0 |
 | Skipped | 0 |
@@ -322,7 +322,6 @@ These tests establish evidence for the implemented cases; they do not prove corr
 Benchmark conditions (26 October 2026): These local measurements used an Intel Core i5-9300H (4 cores/8 threads), 15.9 GB RAM, and NVMe storage. The application and MySQL ran through Docker Compose, while k6 ran on the same laptop. The application Hikari pool maximum was 10. The hot-pair scenario used 5 constant VUs for 30 seconds against two wallets. The wallet-pool scenario used 10 wallets and ramped through 5 VUs for 30 seconds, 10 VUs for 30 seconds, 25 VUs for 30 seconds, then ramped down to 0 over 10 seconds. Transfers used 1 paise; setup funded each generated wallet with INR 10,000. These are workload-specific local measurements, not production-capacity guarantees. HTTP request metrics include setup requests, whereas iteration counts represent transfer-loop iterations.
 
 
-Both benchmarks ran on one laptop, with the application and MySQL running through Docker Compose and k6 running from the host. These are local development measurements, not production capacity guarantees.
 
 ### Test environment
 
@@ -390,10 +389,10 @@ The InnoDB deadlock counter also remained at zero during each measured run. Thes
 3. Add API rate limiting and operational monitoring.
 4. Add customer statement APIs.
 5. Rerun the k6 scenarios in a dedicated environment using the packaged Docker application, and document the environment and limits.
-6. Consider fraud detection as a separate future module, consuming published events rather than adding fraud logic to this version.
+6. Keep fraud detection as a separate future project that consumes published events; do not add synchronous fraud logic to WalletLedger.
 
 ## Project status
 
-WalletLedger's current implemented scope includes transactional wallet operations, idempotent money movement, Phase 1 transaction reversals, ledger/audit/outbox integration, bounded deadlock retry, concurrency/integrity tests, and JWT bearer authentication. The latest full working-tree verification on 2026-10-25 passed 140 tests, with 0 failures, 0 errors, and 0 skipped. Earlier checkpoints passed 113 combined working-tree tests and 112 tests in the isolated Phase 1 snapshot.
+WalletLedger's current implemented scope includes transactional wallet operations, idempotent money movement, Phase 1 transaction reversals, ledger/audit/outbox integration, bounded deadlock retry, concurrency/integrity tests, and JWT bearer authentication. The latest full clean verification on 2026-10-28 at commit a3f2b29 passed 149 tests, with 0 failures, 0 errors, and 0 skipped; 30 Surefire XML reports were generated. Earlier checkpoints passed 113 combined working-tree tests and 112 tests in the isolated Phase 1 snapshot.
 
 The repository is published on GitHub for review and demonstration. The implemented scope, verification evidence, and known limitations are documented above. Benchmark results are local observations and do not establish production capacity.

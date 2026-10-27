@@ -46,3 +46,6 @@ k6/*.json
 
 .phase2-auth-backup-*/
 *.bak*
+
+# Timestamped local Markdown backups
+*.md.backup-*
