@@ -68,7 +68,7 @@ With Java 21 installed and Docker available for integration tests, run:
 .\mvnw.cmd clean verify
 ```
 
-Historical checkpoints: v1.0 passed 97 tests; the isolated Phase 1 snapshot passed 112 tests. The full working-tree verification on 2026-10-25 passed 140 tests, with 0 failures, 0 errors, and 0 skipped (`BUILD SUCCESS`). Run the command again after future code changes. Results on another machine may differ depending on its environment and resources.
+Historical checkpoints: v1.0 passed 97 tests; the isolated Phase 1 snapshot passed 112 tests. The latest full clean verification on 2026-10-28 at commit a3f2b29 passed 149 tests, with 0 failures, 0 errors, and 0 skipped (`BUILD SUCCESS`); 30 Surefire XML reports were generated. Run the command again after future code changes. Results on another machine may differ depending on its environment and resources.
 
 ## Run the API locally outside Docker
 
