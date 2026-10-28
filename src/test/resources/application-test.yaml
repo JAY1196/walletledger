@@ -32,3 +32,13 @@ walletledger:
   security:
     jwt:
       secret: "dGVzdC1vbmx5LWtleS1mb3Itd2FsbGV0bGVkZ2VyLTIwMjYh"
+
+  rate-limit:
+    login:
+      capacity: 100000
+      refill-tokens: 100000
+      refill-duration: PT1M
+    money-movement:
+      capacity: 100000
+      refill-tokens: 100000
+      refill-duration: PT1M

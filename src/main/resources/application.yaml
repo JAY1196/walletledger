@@ -9,3 +9,13 @@ spring:
   # Use dev only when no profile has been explicitly activated.
   profiles:
     default: dev
+walletledger:
+  rate-limit:
+    login:
+      capacity: 10
+      refill-tokens: 10
+      refill-duration: PT1M
+    money-movement:
+      capacity: 30
+      refill-tokens: 30
+      refill-duration: PT1M
