@@ -38,7 +38,7 @@ flowchart TD
     DB --- Ledger
     DB --- Audit
     DB --- Outbox
-    Redis -. Provisioned; not currently used by the core money-movement flow .- API
+    Redis -. Distributed API rate limiting .- API
 ```
 
 ## Money-transfer flow
@@ -151,7 +151,7 @@ Start the required MySQL and Redis services using your configured local setup, t
 .\mvnw.cmd clean verify
 ```
 
-The 97-test result is a historical v1.0 checkpoint. An earlier combined working-tree checkpoint passed 113 tests, and the isolated Phase 1 snapshot passed 112 tests. The latest full clean verification on 2026-10-28 at commit a3f2b29 passed 149 tests, with 0 failures, 0 errors, and 0 skipped; 30 Surefire XML reports were generated. The project retains its Surefire `forkCount=0` workaround because removing it caused a fork-startup failure in this environment.
+The 97-test result is a historical v1.0 checkpoint. An earlier combined working-tree checkpoint passed 113 tests, and the isolated Phase 1 snapshot passed 112 tests. The latest local full clean verification on 2026-10-31, including the W1 Redis outage fail-open test, passed 159 tests, with 0 failures, 0 errors, and 0 skipped. This is local working-tree evidence; the merged main commit has a separate successful GitHub Actions CI run. The project retains its Surefire `forkCount=0` workaround because removing it caused a fork-startup failure in this environment.
 
 To start Spring Boot from Maven:
 
@@ -299,7 +299,7 @@ Latest verified Maven build:
 | Result | Count |
 |---|---:|
 | Surefire XML reports | 30 |
-| Tests run | 149 |
+| Tests run | 159 |
 | Failures | 0 |
 | Errors | 0 |
 | Skipped | 0 |
@@ -371,28 +371,59 @@ After both reruns, the four SQL checks reported:
 
 The InnoDB deadlock counter also remained at zero during each measured run. These checks support the observed results but do not prove correctness under every possible workload or failure condition.
 
+
+## API rate limiting (W1)
+
+WalletLedger implements Redis-backed token-bucket API rate limiting.
+
+- Login: `POST /api/v1/auth/login`, keyed by the client's remote IP address.
+- Money movement: keyed by authenticated user UUID.
+- Money-movement POST paths:
+  - `/api/v1/wallets/*/topup`
+  - `/api/v1/wallets/*/withdraw`
+  - `/api/v1/transfers`
+  - `/api/v1/transactions/*/reverse`
+- Default login bucket: 10 requests per PT1M.
+- Default money-movement bucket: 30 requests per PT1M.
+- Redis Lua execution makes token consumption atomic.
+- Redis server time is used for refill calculations.
+- Bucket keys receive an expiry so idle buckets do not remain indefinitely.
+- Rate-limit rejections return HTTP 429 with a `Retry-After` header.
+
+### Rate-limiting limitations
+
+1. `POST /api/v1/users` registration is not rate-limited.
+2. API paths outside the explicitly configured rate-limit interceptor patterns are not rate-limited.
+3. Money-movement rate limiting applies only to POST requests on the four listed paths.
+4. Login client identification uses `HttpServletRequest.getRemoteAddr()`.
+5. Behind a reverse proxy, multiple clients may appear to share the proxy's IP address.
+6. Forwarded IP headers must only be trusted when supplied and sanitized by configured trusted proxies. Arbitrary client-supplied forwarding headers must not be trusted.
+7. Redis outage causes rate limiting to fail open. Requests are allowed when Redis is unavailable, preserving availability but temporarily removing rate-limit enforcement.
+
+The benchmark profile raises rate-limit capacities for isolated load testing. It must not be used as a production profile.
+
 ## Security and operational limitations
 
-- JWT bearer authentication is implemented; production hardening, including secret rotation, TLS enforcement, rate limiting, and a security review, remains necessary.
+- JWT bearer authentication and Redis-backed API rate limiting are implemented; production hardening, including secret rotation, TLS enforcement, rate-limit monitoring and proxy configuration, and a security review, remains necessary.
 - A shared system wallet can become a contention hotspot.
 - The benchmarks ran on a single machine; they are not distributed production benchmarks.
-- Redis is provisioned but is not currently used by the core money-movement flow.
+- Redis supports distributed API rate limiting; MySQL remains authoritative for balances, ledger entries, and transaction state.
 - Outbox events are recorded, but a production outbox publisher and delivery/retry workflow are not implemented.
 - No fraud detection engine is included in this version.
-- Transaction reversals are implemented in Phase 1; customer statements and API rate limiting are not implemented.
+- Transaction reversals are implemented in Phase 1; customer statement APIs remain unimplemented.
 - Production deployment still requires proper identity, authorization, secrets management, monitoring, operational recovery procedures and security review.
 
 ## Next steps
 
 1. Harden authentication and authorization for production deployment, including secret rotation, TLS, and security review.
 2. Implement an outbox publisher with reliable delivery, retries and observability.
-3. Add API rate limiting and operational monitoring.
+3. Harden and monitor the implemented API rate limiting in production.
 4. Add customer statement APIs.
 5. Rerun the k6 scenarios in a dedicated environment using the packaged Docker application, and document the environment and limits.
 6. Keep fraud detection as a separate future project that consumes published events; do not add synchronous fraud logic to WalletLedger.
 
 ## Project status
 
-WalletLedger's current implemented scope includes transactional wallet operations, idempotent money movement, Phase 1 transaction reversals, ledger/audit/outbox integration, bounded deadlock retry, concurrency/integrity tests, and JWT bearer authentication. The latest full clean verification on 2026-10-28 at commit a3f2b29 passed 149 tests, with 0 failures, 0 errors, and 0 skipped; 30 Surefire XML reports were generated. Earlier checkpoints passed 113 combined working-tree tests and 112 tests in the isolated Phase 1 snapshot.
+WalletLedger's current implemented scope includes transactional wallet operations, idempotent money movement, Phase 1 transaction reversals, ledger/audit/outbox integration, bounded deadlock retry, concurrency/integrity tests, and JWT bearer authentication. The latest local full clean verification on 2026-10-31, including the W1 Redis outage fail-open test, passed 159 tests, with 0 failures, 0 errors, and 0 skipped. This is local working-tree evidence; the merged main commit has a separate successful GitHub Actions CI run. Earlier checkpoints passed 113 combined working-tree tests and 112 tests in the isolated Phase 1 snapshot.
 
 The repository is published on GitHub for review and demonstration. The implemented scope, verification evidence, and known limitations are documented above. Benchmark results are local observations and do not establish production capacity.
