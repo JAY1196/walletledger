@@ -8,6 +8,7 @@ const expected4xx = new Counter('expected_4xx');
 const unexpected4xx = new Counter('unexpected_4xx');
 const unexpected5xx = new Counter('unexpected_5xx');
 const unexpectedOther = new Counter('unexpected_other');
+const rateLimited429 = new Counter('rate_limited_429');
 
 // Set RUN_ID once from PowerShell for consistent reporting.
 const runId = __ENV.RUN_ID || 'walletledger-k6';
@@ -63,7 +64,6 @@ const selectedScenarios =
       : scenarioDefinitions;
 
 export const options = {
-  // Explicitly include p99 in the end-of-test summary.
   summaryTrendStats: [
     'avg',
     'min',
@@ -82,6 +82,7 @@ export const options = {
     unexpected_4xx: ['count==0'],
     unexpected_5xx: ['count==0'],
     unexpected_other: ['count==0'],
+    rate_limited_429: ['count==0'],
   },
 };
 
@@ -184,13 +185,19 @@ export function setup() {
     wallets.push(walletId);
   }
 
-  console.log(`Prepared ${walletCount} authenticated, funded wallets for run ${runId}`);
+  console.log(
+    `Prepared ${walletCount} authenticated, funded wallets for run ${runId}`
+  );
 
   return { tokens, wallets };
 }
 
 function recordResponse(response) {
   const status = response.status;
+
+  if (status === 429) {
+    rateLimited429.add(1);
+  }
 
   if (status >= 400 && status < 500) {
     if (expected4xxStatuses.includes(status)) {
@@ -278,6 +285,7 @@ export function handleSummary(data) {
     `Unexpected 4xx responses: ${metricValue(data, 'unexpected_4xx', 'count')}`,
     `Unexpected 5xx responses: ${metricValue(data, 'unexpected_5xx', 'count')}`,
     `Unexpected other responses: ${metricValue(data, 'unexpected_other', 'count')}`,
+    `HTTP 429 rate-limit responses: ${metricValue(data, 'rate_limited_429', 'count')}`,
     '==============================================',
     '',
   ].join('\n');

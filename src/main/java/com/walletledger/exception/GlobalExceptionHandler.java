@@ -1,5 +1,7 @@
 package com.walletledger.exception;
 
+import com.walletledger.ratelimit.RateLimitExceededException;
+
 import jakarta.persistence.OptimisticLockException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolation;
@@ -20,6 +22,7 @@ import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.dao.TransientDataAccessResourceException;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -53,6 +56,13 @@ public class GlobalExceptionHandler {
                 errorCode.name(),
                 request
         );
+
+        if (ex instanceof RateLimitExceededException rateLimitException) {
+            return ResponseEntity.status(errorCode.status())
+                    .header(HttpHeaders.RETRY_AFTER,
+                            Long.toString(rateLimitException.getRetryAfterSeconds()))
+                    .body(body);
+        }
 
         return ResponseEntity.status(errorCode.status()).body(body);
     }

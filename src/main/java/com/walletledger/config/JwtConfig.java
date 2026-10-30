@@ -15,7 +15,7 @@ public class JwtConfig {
 
     @Bean
     public SecretKey jwtSigningKey(
-            @Value("${walletledger.security.jwt.secret}") String secret) {
+            @Value("${walletledger.security.jwt.secret:${WALLETLEDGER_SECURITY_JWT_SECRET}}") String secret) {
 
         if (secret == null || secret.isBlank()) {
             throw new IllegalStateException(
