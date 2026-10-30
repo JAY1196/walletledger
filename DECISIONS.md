@@ -172,19 +172,48 @@ and outbox event must eventually be committed atomically.
 The publisher, Kafka integration, and fraud-detection features are
 deferred to later modules. Fraud detection is not part of Module 1.
 
-## 13. Redis availability
+## 13. Redis availability and API rate limiting
 
-**Decision:** Redis is a cache/rate-limiting dependency, not the source
-of truth for balances or idempotency.
+**Decision:** Redis is used for distributed API rate limiting, not as the
+source of truth for balances, ledger entries, or idempotency.
 
-**Why:** The database remains authoritative. The planned rate limiter
-fails open when Redis is unavailable, with an operational log entry.
+**Implementation:**
 
-Readiness checks MySQL but deliberately excludes Redis. Overall health
-can report Redis failure while readiness remains UP.
+- Login rate limiting covers `POST /api/v1/auth/login` and uses the remote
+  client IP as its key.
+- Money-movement rate limiting uses the authenticated user UUID.
+- Money-movement POST paths are:
+  - `/api/v1/wallets/*/topup`
+  - `/api/v1/wallets/*/withdraw`
+  - `/api/v1/transfers`
+  - `/api/v1/transactions/*/reverse`
+- Redis Lua execution makes token consumption atomic.
+- Refill calculations use Redis server time.
+- Bucket keys receive an expiry to clean up idle buckets.
+- Rejected requests return HTTP 429 with a `Retry-After` header.
+- If Redis is unavailable, rate-limit checks fail open so requests are
+  allowed. This preserves availability but temporarily removes enforcement.
 
-Implementation status (2026-10-18): the rate limiter and its fail-open behavior remain deferred unless documented in a later update.
+**Limitations:**
 
+1. `POST /api/v1/users` registration is not rate-limited.
+2. API paths outside the configured interceptor patterns are not rate-limited.
+3. Money-movement throttling applies only to POST requests on the four paths
+   listed above.
+4. Login client identification uses `getRemoteAddr()`.
+5. Behind a reverse proxy, multiple clients may appear to share the proxy IP.
+6. Forwarded IP headers must only be trusted when supplied and sanitized by
+   configured trusted proxies. Arbitrary client-supplied forwarding headers
+   must not be trusted.
+7. Redis outage causes fail-open behavior and temporarily removes rate-limit
+   enforcement.
+
+Readiness checks MySQL but deliberately excludes Redis. Overall health can
+report Redis failure while readiness remains UP.
+
+**Verification:** The dedicated Redis outage test and full local Maven suite
+passed on 2026-10-31. The merged main commit also has a successful GitHub
+Actions CI run; see the CI evidence in section 26.
 ## 14. JWT authentication and API errors
 
 **Decision:** Use signed JWT bearer access tokens for protected API requests.
@@ -253,7 +282,8 @@ This section records scope boundaries; it is not a claim that every item was com
 - **Verified:** The 2,000 opposite-direction transfer stress test and local k6 benchmark scenarios.
 - **Implemented in Phase 1:** Transaction reversal posting and API. Customer statement APIs remain unimplemented.
 - **Implemented in Phase 2:** Password-based login and JWT bearer authentication for protected API requests.
-- **Open:** Production authentication/authorization hardening, outbox publishing, rate limiting, and production deployment controls.
+- **Implemented (W1):** Redis-backed API rate limiting for login and the configured money-movement POST paths. Production proxy configuration, monitoring, and security hardening remain open.
+- **Open:** Production authentication/authorization hardening, outbox publishing, and production deployment controls.
 - **Deferred by scope:** Fraud detection; retain the outbox for possible future integration, but do not implement fraud features in this project phase.
 
 ### Historical Module 2 implementation record
@@ -287,15 +317,21 @@ These test results establish the behaviors covered by the current suite; they do
 
 ## 19. Open items and scope guardrails
 
-The following are **Open**; they are not represented as completed:
+**Implemented:**
 
-- **Implemented in Phase 2:** JWT bearer authentication and password-based login.
-- **Open:** Complete production security hardening and review authorization coverage.
-- **Open:** Implement and operate the transactional outbox publisher.
-- **Open:** Add API rate limiting, production monitoring, and deployment controls.
-- **Open:** Rerun k6 scenarios against the packaged Docker application in a dedicated environment.
-- **Implemented in Phase 1:** Transaction reversal posting and API. Customer statement APIs remain unimplemented.
-- **Deferred:** Fraud detection remains out of scope. Do not build fraud features as part of this work.
+- **Phase 2:** JWT bearer authentication and password-based login.
+- **W1:** Redis-backed API rate limiting. Production monitoring, proxy configuration, and deployment hardening remain open.
+- **Phase 1:** Transaction reversal posting and API. Customer statement APIs remain unimplemented.
+
+**Open (not represented as completed):**
+
+- Complete production security hardening and review authorization coverage.
+- Implement and operate the transactional outbox publisher.
+- Rerun k6 scenarios against the packaged Docker application in a dedicated environment.
+
+**Deferred:**
+
+- Fraud detection remains out of scope. Do not build fraud features as part of this work.
 
 **Migration safeguard:** Do not edit already-applied Flyway V1/V2 migrations to change the existing schema. Use a new versioned migration for future schema changes.
 
@@ -555,4 +591,4 @@ The results are local measurements from one machine with the application, databa
 
 **Secrets:** CI supplies only a test JWT secret. It must not depend on the developer's local `.env` or production credentials.
 
-**CI evidence:** The initial GitHub Actions check passed on PR #1 before it was merged. The separate local clean verification recorded on 2026-10-28 at commit a3f2b29 passed 149 tests, with 0 failures, 0 errors, and 0 skipped. These are distinct pieces of evidence; do not infer a post-merge Actions result from the local run.
+**CI evidence:** GitHub Actions CI run #7 completed successfully on the push to main for merge commit 09781f8a2701affb8e41dfd5cfda098632a56671 on 2026-10-30. This is separate from the local full clean verification on 2026-10-31, which passed 159 tests with 0 failures, 0 errors, and 0 skipped in the working tree containing the new Redis outage test. The outage test was not part of merge commit 09781f8; it remains a local follow-up change until committed and pushed.
