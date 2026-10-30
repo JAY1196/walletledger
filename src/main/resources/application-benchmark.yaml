@@ -1,0 +1,10 @@
+walletledger:
+  rate-limit:
+    login:
+      capacity: 100000
+      refill-tokens: 100000
+      refill-duration: PT1M
+    money-movement:
+      capacity: 100000
+      refill-tokens: 100000
+      refill-duration: PT1M

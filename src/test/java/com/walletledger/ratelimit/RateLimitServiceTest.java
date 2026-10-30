@@ -38,4 +38,31 @@ class RateLimitServiceTest {
         assertTrue(decision.allowed());
         assertEquals(0, decision.retryAfterSeconds());
     }
+
+    @Test
+    void allowsMoneyMovementWhenRedisIsUnavailable() {
+        RedisTokenBucketRateLimiter limiter =
+                mock(RedisTokenBucketRateLimiter.class);
+
+        RateLimitProperties.Bucket loginBucket =
+                new RateLimitProperties.Bucket(10, 10, Duration.ofMinutes(1));
+
+        RateLimitProperties.Bucket moneyBucket =
+                new RateLimitProperties.Bucket(30, 30, Duration.ofMinutes(1));
+
+        RateLimitProperties properties =
+                new RateLimitProperties(loginBucket, moneyBucket);
+
+        when(limiter.tryAcquire("money-test-key", moneyBucket))
+                .thenThrow(new DataAccessResourceFailureException(
+                        "Redis unavailable"));
+
+        RateLimitService service = new RateLimitService(limiter, properties);
+
+        RedisTokenBucketRateLimiter.Decision decision =
+                service.checkMoneyMovement("money-test-key");
+
+        assertTrue(decision.allowed());
+        assertEquals(0, decision.retryAfterSeconds());
+    }
 }
