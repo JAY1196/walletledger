@@ -485,3 +485,18 @@ These are observed local execution plans, not a production performance guarantee
 WalletLedger's current implemented scope includes transactional wallet operations, idempotent money movement, Phase 1 transaction reversals, the owner-scoped W2 wallet statement API with keyset pagination, ledger/audit/outbox integration, bounded deadlock retry, concurrency/integrity tests, and JWT bearer authentication. The latest local full clean verification on 2026-11-02 passed 171 tests, with 0 failures, 0 errors, and 0 skipped. This is local working-tree evidence; the merged main commit has a separate successful GitHub Actions CI run. Earlier checkpoints passed 113 combined working-tree tests and 112 tests in the isolated Phase 1 snapshot.
 
 The repository is published on GitHub for review and demonstration. The implemented scope, verification evidence, and known limitations are documented above. Benchmark results are local observations and do not establish production capacity.
+
+## Wallet statements (W2)
+
+The owner-scoped statement endpoint is:
+
+`GET /api/v1/wallets/{id}/transactions`
+
+- Uses descending keyset pagination with an opaque cursor.
+- Supports a default page size of 20 and a maximum of 100 entries.
+- The endpoint is a GET request and is not covered by the configured Redis rate-limiting rules, which currently target login and selected money-movement POST endpoints.
+- TOPUP and WITHDRAWAL entries show a `null` counterparty wallet ID when the other side is the internal SYSTEM wallet. The SYSTEM wallet is intentionally hidden from customer-facing statements.
+- The `status` field represents the transaction's current status, not a separate status belonging to the individual ledger entry.
+- Pagination is not a single database snapshot. Refresh the first page to see new activity committed after a pagination walk begins.
+
+The statement query uses the composite index `idx_ledger_wallet_cursor (wallet_id, id DESC)`. Local MySQL 8.4.11 EXPLAIN checks confirmed index use for both first-page and cursor-page queries.

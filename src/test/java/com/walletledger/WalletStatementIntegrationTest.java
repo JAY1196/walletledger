@@ -1,6 +1,7 @@
 package com.walletledger;
 
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.walletledger.repository.LedgerEntryRepository;
 import com.walletledger.repository.WalletRepository;
 import com.walletledger.service.JwtService;
 
@@ -14,6 +15,14 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Future;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.CountDownLatch;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.ArrayList;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -37,6 +46,9 @@ class WalletStatementIntegrationTest {
 
     @Autowired
     private WalletRepository walletRepository;
+
+    @Autowired
+    private LedgerEntryRepository ledgerEntryRepository;
 
     private final JsonMapper jsonMapper = JsonMapper.builder().build();
 
@@ -647,5 +659,305 @@ class WalletStatementIntegrationTest {
         org.junit.jupiter.api.Assertions.assertFalse(
                 walkedTransactionIds.contains(newlyInsertedId),
                 "A new entry must not appear in an already-started pagination walk.");
+    }
+
+    @Test
+    void completeMixedEntryStatementMatchesCachedWalletBalance()
+            throws Exception {
+
+        String userId = registerUser();
+        String walletId = createWallet(userId);
+        String receiverId = registerUser();
+        String receiverWalletId = createWallet(receiverId);
+
+        topUp(userId, walletId, 1_000);
+
+        String originalTransactionId =
+                topUpAndGetTransactionId(userId, walletId, 200);
+
+        mockMvc.perform(post(
+                        "/api/v1/transactions/{id}/reverse",
+                        originalTransactionId)
+                        .header("Authorization", bearerToken(userId))
+                        .header("Idempotency-Key",
+                                "mixed-reversal-" + UUID.randomUUID()))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/api/v1/transfers")
+                        .header("Authorization", bearerToken(userId))
+                        .header("Idempotency-Key",
+                                "mixed-transfer-" + UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                    "sourceWalletId": "%s",
+                                    "destinationWalletId": "%s",
+                                    "amountPaise": 300
+                                }
+                                """.formatted(walletId, receiverWalletId)))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post(
+                        "/api/v1/wallets/{id}/withdraw", walletId)
+                        .header("Authorization", bearerToken(userId))
+                        .header("Idempotency-Key",
+                                "mixed-withdrawal-" + UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"amountPaise": 100}
+                                """))
+                .andExpect(status().isCreated());
+
+        java.util.Set<Long> entryIds = new java.util.HashSet<>();
+        java.util.Set<String> entryTypes = new java.util.HashSet<>();
+
+        long signedBalance = 0L;
+        String cursor = null;
+
+        do {
+            var request = get(
+                    "/api/v1/wallets/{id}/transactions", walletId)
+                    .header("Authorization", bearerToken(userId))
+                    .param("limit", "2");
+
+            if (cursor != null) {
+                request.param("cursor", cursor);
+            }
+
+            String response = mockMvc.perform(request)
+                    .andExpect(status().isOk())
+                    .andReturn()
+                    .getResponse()
+                    .getContentAsString();
+
+            var json = jsonMapper.readTree(response);
+
+            for (var item : json.get("items")) {
+                long entryId = item.get("entry_id").asLong();
+                long amount = item.get("amount_paise").asLong();
+                String direction = item.get("direction").asText();
+
+                org.junit.jupiter.api.Assertions.assertTrue(
+                        entryIds.add(entryId),
+                        "Duplicate entry ID found during pagination.");
+
+                entryTypes.add(item.get("type").asText());
+
+                signedBalance += "CREDIT".equals(direction)
+                        ? amount
+                        : -amount;
+            }
+
+            cursor = json.get("next_cursor").isNull()
+                    ? null
+                    : json.get("next_cursor").asText();
+
+        } while (cursor != null);
+
+        org.junit.jupiter.api.Assertions.assertEquals(
+                java.util.Set.of(
+                        "TOPUP", "TRANSFER", "WITHDRAWAL", "REVERSAL"),
+                entryTypes);
+
+        long cachedBalance = walletRepository
+                .findById(UUID.fromString(walletId))
+                .orElseThrow()
+                .getBalance();
+
+        org.junit.jupiter.api.Assertions.assertEquals(
+                cachedBalance,
+                signedBalance,
+                "Complete statement balance must match cached wallet balance.");
+
+        org.junit.jupiter.api.Assertions.assertEquals(
+                600L, cachedBalance);
+    }
+
+    @Test
+    void concurrentTransfersDoNotDuplicateOrSkipExistingStatementEntries()
+            throws Exception {
+
+        String senderId = registerUser();
+        String receiverId = registerUser();
+
+        String senderWalletId = createWallet(senderId);
+        String receiverWalletId = createWallet(receiverId);
+
+        for (int i = 0; i < 8; i++) {
+            topUp(senderId, senderWalletId, 1_000);
+        }
+
+        UUID senderWalletUuid = UUID.fromString(senderWalletId);
+
+        Set<Long> baselineEntryIds = new HashSet<>();
+        for (var entry :
+                ledgerEntryRepository.findByWalletIdOrderByIdAsc(
+                        senderWalletUuid)) {
+            baselineEntryIds.add(entry.getId());
+        }
+
+        org.junit.jupiter.api.Assertions.assertFalse(
+                baselineEntryIds.isEmpty(),
+                "Baseline must contain entries before pagination starts.");
+
+        int writerCount = 4;
+        int transfersPerWriter = 5;
+
+        ExecutorService executor = Executors.newFixedThreadPool(writerCount + 1);
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch firstPageRead = new CountDownLatch(1);
+        CountDownLatch writersStarted = new CountDownLatch(writerCount);
+
+        try {
+            Future<Set<Long>> reader = executor.submit(() -> {
+                if (!start.await(30, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException(
+                            "Reader did not receive the start signal.");
+                }
+
+                Set<Long> collectedIds = new HashSet<>();
+                Long previousEntryId = null;
+                String cursor = null;
+                boolean firstPage = true;
+
+                do {
+                    var request = get(
+                            "/api/v1/wallets/{id}/transactions",
+                            senderWalletId)
+                            .header("Authorization", bearerToken(senderId))
+                            .param("limit", "2");
+
+                    if (cursor != null) {
+                        request.param("cursor", cursor);
+                    }
+
+                    String response = mockMvc.perform(request)
+                            .andExpect(status().isOk())
+                            .andReturn()
+                            .getResponse()
+                            .getContentAsString();
+
+                    var json = jsonMapper.readTree(response);
+
+                    for (var item : json.get("items")) {
+                        long entryId = item.get("entry_id").asLong();
+
+                        if (!collectedIds.add(entryId)) {
+                            throw new AssertionError(
+                                    "Duplicate entry ID: " + entryId);
+                        }
+
+                        if (previousEntryId != null
+                                && entryId >= previousEntryId) {
+                            throw new AssertionError(
+                                    "Entry IDs are not strictly descending: "
+                                            + previousEntryId + " then "
+                                            + entryId);
+                        }
+
+                        previousEntryId = entryId;
+                    }
+
+                    cursor = json.get("next_cursor").isNull()
+                            ? null
+                            : json.get("next_cursor").asText();
+
+                    if (firstPage) {
+                        firstPage = false;
+                        firstPageRead.countDown();
+
+                        if (!writersStarted.await(30, TimeUnit.SECONDS)) {
+                            throw new IllegalStateException(
+                                    "Writer threads did not all start.");
+                        }
+                    }
+
+                    // Give the writer threads an opportunity to interleave.
+                    Thread.sleep(2);
+
+                } while (cursor != null);
+
+                if (firstPage) {
+                    firstPageRead.countDown();
+                }
+
+                return collectedIds;
+            });
+
+            java.util.List<Future<?>> writers = new ArrayList<>();
+
+            for (int writer = 0; writer < writerCount; writer++) {
+                final int writerNumber = writer;
+
+                writers.add(executor.submit(() -> {
+                    if (!start.await(30, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException(
+                                "Writer did not receive the start signal.");
+                    }
+
+                    if (!firstPageRead.await(30, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException(
+                                "Reader did not finish its first page.");
+                    }
+
+                    writersStarted.countDown();
+
+                    for (int transfer = 0;
+                            transfer < transfersPerWriter;
+                            transfer++) {
+
+                        mockMvc.perform(post("/api/v1/transfers")
+                                        .header(
+                                                "Authorization",
+                                                bearerToken(senderId))
+                                        .header(
+                                                "Idempotency-Key",
+                                                "concurrent-statement-"
+                                                        + writerNumber + "-"
+                                                        + transfer + "-"
+                                                        + UUID.randomUUID())
+                                        .contentType(MediaType.APPLICATION_JSON)
+                                        .content("""
+                                                {
+                                                  "sourceWalletId": "%s",
+                                                  "destinationWalletId": "%s",
+                                                  "amountPaise": 100
+                                                }
+                                                """.formatted(
+                                                senderWalletId,
+                                                receiverWalletId)))
+                                .andExpect(status().isCreated());
+                    }
+
+                    return null;
+                }));
+            }
+
+            start.countDown();
+
+            Set<Long> walkedEntryIds =
+                    reader.get(120, TimeUnit.SECONDS);
+
+            for (Future<?> writer : writers) {
+                writer.get(120, TimeUnit.SECONDS);
+            }
+
+            org.junit.jupiter.api.Assertions.assertTrue(
+                    walkedEntryIds.containsAll(baselineEntryIds),
+                    "Every entry present before the walk must appear.");
+
+            org.junit.jupiter.api.Assertions.assertEquals(
+                    baselineEntryIds.size(),
+                    baselineEntryIds.stream()
+                            .filter(walkedEntryIds::contains)
+                            .count(),
+                    "Every baseline entry must appear exactly once.");
+
+        } finally {
+            executor.shutdownNow();
+            org.junit.jupiter.api.Assertions.assertTrue(
+                    executor.awaitTermination(30, TimeUnit.SECONDS),
+                    "Concurrency test executor did not terminate.");
+        }
     }
 }
