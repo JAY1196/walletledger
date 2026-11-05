@@ -2,6 +2,8 @@ package com.walletledger.controller;
 
 import com.walletledger.dto.MoneyMovementRequest;
 import com.walletledger.dto.WalletResponse;
+import com.walletledger.dto.WalletStatementResponse;
+import com.walletledger.service.WalletStatementService;
 import com.walletledger.service.TransferHttpResponse;
 import com.walletledger.service.MySqlDeadlockRetryExecutor;
 import com.walletledger.service.WalletMoneyMovementService;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.UUID;
@@ -30,14 +33,17 @@ public class WalletController {
     private final WalletService walletService;
     private final WalletMoneyMovementService moneyMovementService;
     private final MySqlDeadlockRetryExecutor deadlockRetryExecutor;
+    private final WalletStatementService walletStatementService;
 
     public WalletController(
             WalletService walletService,
             WalletMoneyMovementService moneyMovementService,
-            MySqlDeadlockRetryExecutor deadlockRetryExecutor) {
+            MySqlDeadlockRetryExecutor deadlockRetryExecutor,
+            WalletStatementService walletStatementService) {
         this.walletService = walletService;
         this.moneyMovementService = moneyMovementService;
         this.deadlockRetryExecutor = deadlockRetryExecutor;
+        this.walletStatementService = walletStatementService;
     }
 
     @SecurityRequirement(name = "BearerAuth")
@@ -102,4 +108,18 @@ public class WalletController {
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(response.body());
     }
-}
+
+    @SecurityRequirement(name = "BearerAuth")
+    @GetMapping("/{id}/transactions")
+    public ResponseEntity<WalletStatementResponse> getStatement(
+            @PathVariable UUID id,
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) String cursor,
+            HttpServletRequest request) {
+
+        WalletStatementResponse response =
+                walletStatementService.getStatement(
+                        id, limit, cursor, request);
+
+        return ResponseEntity.ok(response);
+    }}

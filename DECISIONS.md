@@ -592,3 +592,33 @@ The results are local measurements from one machine with the application, databa
 **Secrets:** CI supplies only a test JWT secret. It must not depend on the developer's local `.env` or production credentials.
 
 **CI evidence:** GitHub Actions CI run #7 completed successfully on the push to main for merge commit 09781f8a2701affb8e41dfd5cfda098632a56671 on 2026-10-30. This is separate from the local full clean verification on 2026-10-31, which passed 159 tests with 0 failures, 0 errors, and 0 skipped in the working tree containing the new Redis outage test. The outage test was not part of merge commit 09781f8; it remains a local follow-up change until committed and pushed.
+
+## 27. Wallet statement pagination (W2)
+
+**Decision:** Expose wallet ledger entries through an owner-scoped GET endpoint using descending keyset pagination.
+
+**Ledger ID ordering and concurrency guarantee:**
+
+- All ledger posting paths use `LedgerPostingService.post()`.
+- Before inserting ledger entries, the posting service acquires pessimistic wallet-row locks in the canonical `WalletLockOrder`.
+- Writers posting entries for the same wallet are therefore serialized by that wallet's row lock.
+- A later writer cannot insert its entries for that wallet until the earlier writer releases its lock through transaction completion.
+- Consequently, under this shared locking protocol, ledger entry IDs for a wallet follow commit order.
+
+This is an application-level invariant, not a universal guarantee of `AUTO_INCREMENT`. Direct database inserts or a future posting path that bypasses the wallet-lock protocol could violate it.
+
+**Why keyset pagination:** The statement uses `wallet_id` and `id` with descending order. The composite index `idx_ledger_wallet_cursor (wallet_id, id DESC)` supports wallet filtering and cursor traversal without offset-based pagination.
+
+**Why commit ordering matters:** Without serialized writers, an earlier transaction could allocate a lower AUTO_INCREMENT ID, remain uncommitted, and commit after a later transaction with a higher ID. A reader could advance its cursor past that lower ID before it becomes visible, causing the later commit to be skipped.
+
+**Snapshot limitation:** Each statement page is a separate HTTP request and database read. The complete walk is not one repeatable-read snapshot. New entries committed after the first page are not guaranteed to appear in that ongoing walk; refresh from the first page to see new activity. The wallet-lock ordering protocol protects the walk from missing previously committed entries, provided all ledger writers follow that protocol.
+
+**Index verification (2026-11-02):**
+
+- `SHOW INDEX FROM ledger_entries` confirmed `idx_ledger_wallet_cursor` contains `wallet_id ASC, id DESC`.
+- EXPLAIN for the actual first-page query used `idx_ledger_wallet_cursor` with `ref` access.
+- EXPLAIN for the actual cursor-page query used the same index with `range` access.
+- The transaction and both wallet joins used primary-key `eq_ref` lookups.
+- Neither plan reported `Using filesort`.
+
+These are local MySQL 8.4.11 plan observations, not production performance guarantees.

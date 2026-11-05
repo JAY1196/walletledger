@@ -151,7 +151,7 @@ Start the required MySQL and Redis services using your configured local setup, t
 .\mvnw.cmd clean verify
 ```
 
-The 97-test result is a historical v1.0 checkpoint. An earlier combined working-tree checkpoint passed 113 tests, and the isolated Phase 1 snapshot passed 112 tests. The latest local full clean verification on 2026-10-31, including the W1 Redis outage fail-open test, passed 159 tests, with 0 failures, 0 errors, and 0 skipped. This is local working-tree evidence; the merged main commit has a separate successful GitHub Actions CI run. The project retains its Surefire `forkCount=0` workaround because removing it caused a fork-startup failure in this environment.
+The 97-test result is a historical v1.0 checkpoint. An earlier combined working-tree checkpoint passed 113 tests, and the isolated Phase 1 snapshot passed 112 tests. The W1 local full clean verification on 2026-10-31, including the W1 Redis outage fail-open test, passed 159 tests, with 0 failures, 0 errors, and 0 skipped. This is local working-tree evidence; the merged main commit has a separate successful GitHub Actions CI run. The project retains its Surefire `forkCount=0` workaround because removing it caused a fork-startup failure in this environment.
 
 To start Spring Boot from Maven:
 
@@ -175,6 +175,7 @@ Base URL for the local Docker setup: `http://localhost:8081`
 | `POST` | `/api/v1/wallets/{id}/withdraw` | Withdraw from a wallet |
 | `POST` | `/api/v1/transfers` | Transfer funds between wallets |
 | `POST` | `/api/v1/transactions/{id}/reverse` | Reverse an eligible completed transaction |
+| `GET` | `/api/v1/wallets/{id}/transactions` | Retrieve an owner's paginated wallet statement |
 
 Registration requires `name`, `email`, and `password`. Log in at `/api/v1/auth/login` to obtain a JWT. Protected `/api/**` endpoints require `Authorization: Bearer <token>`; a caller-supplied `X-User-Id` header is not accepted as authentication. Top-ups, withdrawals, transfers, and reversals require an `Idempotency-Key` header. Only the original transaction initiator may reverse an eligible completed transaction.
 
@@ -231,7 +232,33 @@ curl.exe -i "$base/api/v1/wallets/$walletId/balance" `
   -H $authHeader
 ```
 
-#### 4. Top up a wallet
+#### 4. Retrieve a wallet statement (W2)
+
+Retrieve the newest ledger entries for the authenticated owner's wallet:
+
+```powershell
+$statement = Invoke-RestMethod `
+  -Method Get `
+  -Uri "$base/api/v1/wallets/$walletId/transactions?limit=20" `
+  -Headers @{ Authorization = "Bearer $token" }
+
+$statement.items
+$statement.next_cursor
+```
+
+To retrieve the next page, pass the returned cursor:
+
+```powershell
+$cursor = [uri]::EscapeDataString($statement.next_cursor)
+
+$nextPage = Invoke-RestMethod `
+  -Method Get `
+  -Uri "$base/api/v1/wallets/$walletId/transactions?limit=20&cursor=$cursor" `
+  -Headers @{ Authorization = "Bearer $token" }
+```
+
+
+#### 5. Top up a wallet
 
 Use a new idempotency key for a new logical operation:
 
@@ -245,7 +272,7 @@ curl.exe -i -X POST "$base/api/v1/wallets/$walletId/topup" `
 
 This example requests a top-up of INR 100.00.
 
-#### 5. Withdraw from a wallet
+#### 6. Withdraw from a wallet
 
 ```powershell
 curl.exe -i -X POST "$base/api/v1/wallets/$walletId/withdraw" `
@@ -257,7 +284,7 @@ curl.exe -i -X POST "$base/api/v1/wallets/$walletId/withdraw" `
 
 This example requests a withdrawal of INR 10.00. The wallet must satisfy the service's balance and validation rules.
 
-#### 6. Transfer between wallets
+#### 7. Transfer between wallets
 
 Set the source and destination IDs to two valid wallets owned by the appropriate users:
 
@@ -278,7 +305,7 @@ curl.exe -i -X POST "$base/api/v1/transfers" `
 
 This example requests a transfer of INR 10.00. Replace the sample idempotency key when initiating a distinct operation. For a retry of the same logical request, reuse the original key and request details.
 
-#### 6. Reverse a completed transaction
+#### 8. Reverse a completed transaction
 
 Use the original transaction ID returned by a successful top-up, withdrawal, or transfer. The caller must be the original transaction's initiator.
 
@@ -298,11 +325,12 @@ Latest verified Maven build:
 
 | Result | Count |
 |---|---:|
-| Surefire XML reports | 30 |
-| Tests run | 159 |
+| Verification date | 2026-11-02 |
+| Tests run | 171 |
 | Failures | 0 |
 | Errors | 0 |
 | Skipped | 0 |
+| Build | BUILD SUCCESS |
 
 The test suite covers the project's implemented functionality, including request validation, wallet operations, transfer behavior, idempotency, transaction rollback, ledger/audit/outbox behavior, concurrency and integrity checks. A real MySQL deadlock test forces error `1213` and verifies recovery through the bounded retry executor.
 
@@ -402,6 +430,36 @@ WalletLedger implements Redis-backed token-bucket API rate limiting.
 
 The benchmark profile raises rate-limit capacities for isolated load testing. It must not be used as a production profile.
 
+## Wallet statements (W2)
+
+`GET /api/v1/wallets/{id}/transactions` returns a paginated ledger statement for a wallet owned by the authenticated caller.
+
+- JWT-protected; wallet ownership is checked against the authenticated user.
+- Requests for another user's wallet and SYSTEM wallets return `404 NOT_FOUND`.
+- Keyset pagination uses the monotonically increasing `ledger_entries.id`, newest first.
+- Default page size is 20; maximum page size is 100.
+- The opaque URL-safe cursor encodes the last returned ledger-entry position. It does not contain a wallet ID.
+- Every page request is independently scoped to the requested wallet after ownership validation.
+- Invalid cursors and invalid limits return `400 BAD_REQUEST`.
+- A joined statement query retrieves ledger entries, transaction details, and counterparty information. There are no per-entry transaction or wallet lookups.
+- SYSTEM wallet identifiers are hidden from the counterparty field and represented as null.
+- Reversals appear as separate ledger entries. The original transaction reflects its `REVERSED` status.
+- The W2 GET endpoint is JWT-protected but is not included in the W1 POST rate-limiting rules.
+- Pagination is not a database snapshot. Entries inserted after a page is read do not move the existing cursor; a fresh first-page request can show them.
+
+### W2 database index verification
+
+The existing `idx_ledger_wallet_cursor` index covers `(wallet_id ASC, id DESC)`. No new database migration was required.
+
+Live MySQL 8.4.11 verification on 2026-11-02:
+
+- `SHOW INDEX FROM ledger_entries` confirmed the composite index and its column order.
+- First-page `EXPLAIN` selected `idx_ledger_wallet_cursor` with `ref` access.
+- Cursor-page `EXPLAIN` selected the same index with `range` access.
+- Neither execution plan reported `Using filesort`.
+- Transaction and wallet joins used `eq_ref` primary-key lookups.
+
+These are observed local execution plans, not a production performance guarantee.
 ## Security and operational limitations
 
 - JWT bearer authentication and Redis-backed API rate limiting are implemented; production hardening, including secret rotation, TLS enforcement, rate-limit monitoring and proxy configuration, and a security review, remains necessary.
@@ -410,7 +468,7 @@ The benchmark profile raises rate-limit capacities for isolated load testing. It
 - Redis supports distributed API rate limiting; MySQL remains authoritative for balances, ledger entries, and transaction state.
 - Outbox events are recorded, but a production outbox publisher and delivery/retry workflow are not implemented.
 - No fraud detection engine is included in this version.
-- Transaction reversals are implemented in Phase 1; customer statement APIs remain unimplemented.
+- Transaction reversals are implemented in Phase 1; the owner-scoped wallet statement API is implemented in W2.
 - Production deployment still requires proper identity, authorization, secrets management, monitoring, operational recovery procedures and security review.
 
 ## Next steps
@@ -418,12 +476,27 @@ The benchmark profile raises rate-limit capacities for isolated load testing. It
 1. Harden authentication and authorization for production deployment, including secret rotation, TLS, and security review.
 2. Implement an outbox publisher with reliable delivery, retries and observability.
 3. Harden and monitor the implemented API rate limiting in production.
-4. Add customer statement APIs.
+4. Review and extend statement API observability and operational monitoring where needed.
 5. Rerun the k6 scenarios in a dedicated environment using the packaged Docker application, and document the environment and limits.
 6. Keep fraud detection as a separate future project that consumes published events; do not add synchronous fraud logic to WalletLedger.
 
 ## Project status
 
-WalletLedger's current implemented scope includes transactional wallet operations, idempotent money movement, Phase 1 transaction reversals, ledger/audit/outbox integration, bounded deadlock retry, concurrency/integrity tests, and JWT bearer authentication. The latest local full clean verification on 2026-10-31, including the W1 Redis outage fail-open test, passed 159 tests, with 0 failures, 0 errors, and 0 skipped. This is local working-tree evidence; the merged main commit has a separate successful GitHub Actions CI run. Earlier checkpoints passed 113 combined working-tree tests and 112 tests in the isolated Phase 1 snapshot.
+WalletLedger's current implemented scope includes transactional wallet operations, idempotent money movement, Phase 1 transaction reversals, the owner-scoped W2 wallet statement API with keyset pagination, ledger/audit/outbox integration, bounded deadlock retry, concurrency/integrity tests, and JWT bearer authentication. The latest local full clean verification on 2026-11-02 passed 171 tests, with 0 failures, 0 errors, and 0 skipped. This is local working-tree evidence; the merged main commit has a separate successful GitHub Actions CI run. Earlier checkpoints passed 113 combined working-tree tests and 112 tests in the isolated Phase 1 snapshot.
 
 The repository is published on GitHub for review and demonstration. The implemented scope, verification evidence, and known limitations are documented above. Benchmark results are local observations and do not establish production capacity.
+
+## Wallet statements (W2)
+
+The owner-scoped statement endpoint is:
+
+`GET /api/v1/wallets/{id}/transactions`
+
+- Uses descending keyset pagination with an opaque cursor.
+- Supports a default page size of 20 and a maximum of 100 entries.
+- The endpoint is a GET request and is not covered by the configured Redis rate-limiting rules, which currently target login and selected money-movement POST endpoints.
+- TOPUP and WITHDRAWAL entries show a `null` counterparty wallet ID when the other side is the internal SYSTEM wallet. The SYSTEM wallet is intentionally hidden from customer-facing statements.
+- The `status` field represents the transaction's current status, not a separate status belonging to the individual ledger entry.
+- Pagination is not a single database snapshot. Refresh the first page to see new activity committed after a pagination walk begins.
+
+The statement query uses the composite index `idx_ledger_wallet_cursor (wallet_id, id DESC)`. Local MySQL 8.4.11 EXPLAIN checks confirmed index use for both first-page and cursor-page queries.
