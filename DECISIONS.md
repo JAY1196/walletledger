@@ -622,3 +622,82 @@ This is an application-level invariant, not a universal guarantee of `AUTO_INCRE
 - Neither plan reported `Using filesort`.
 
 These are local MySQL 8.4.11 plan observations, not production performance guarantees.
+
+## 28. Automated financial reconciliation (W3)
+
+**Decision:** Implement a read-only SQL reconciliation checker that evaluates
+five financial integrity conditions using one database connection and
+transaction.
+
+### Checks
+
+1. **Transaction-to-ledger consistency:** For COMPLETED and REVERSED
+   transactions, require at least two ledger entries, equal debit and credit
+   totals, and a debit total equal to the transaction amount.
+2. **Reversal consistency:** Detect invalid original/reversal status
+   relationships, missing or duplicate completed reversals, amount
+   mismatches, reversal chains, and reversal ledger entries that do not
+   mirror the original transaction's wallet, amount, and opposite direction.
+3. **Wallet-to-ledger balance:** Compare each cached wallet balance against
+   the sum of its ledger credits and debits. Wallets without ledger entries
+   are included.
+4. **Negative USER wallet:** Detect USER wallets with negative balances.
+   SYSTEM wallets are excluded from this check.
+5. **Global balance:** Require the sum of all wallet balances, including
+   SYSTEM wallets, to equal zero.
+
+### Snapshot and transaction behavior
+
+**Decision:** Execute all five checks through the same JDBC connection in a
+read-only REPEATABLE READ transaction.
+
+InnoDB establishes the consistent-read snapshot when the first consistent
+read executes. A controlled negative-control integration test pauses after
+that first read, modifies a wallet from another connection, and verifies
+that the reconciliation checks continue to observe the original snapshot.
+
+**Boundary:** This test demonstrates consistent point-in-time observation
+for the tested concurrent update. It does not prove that every possible
+false positive is prevented.
+
+The runner restores the connection's original transaction settings after
+execution. Failure-path testing also verifies FAILED run history, bounded
+error-message storage, and release of the MySQL named lock.
+
+### Scheduling and deployment
+
+**Decision:** Keep scheduling disabled by default and enable it explicitly
+through Spring environment properties.
+
+- `WALLETLEDGER_RECONCILIATION_ENABLED` defaults to `false`.
+- `WALLETLEDGER_RECONCILIATION_CRON` defaults to hourly execution.
+- `WALLETLEDGER_RECONCILIATION_LOCK_NAME` identifies the distributed
+  MySQL named lock.
+- `WALLETLEDGER_RECONCILIATION_LOCK_TIMEOUT_SECONDS` configures lock
+  acquisition timeout.
+
+Local Docker Compose, the test profile, and GitHub Actions CI keep scheduling
+disabled. An EC2 application deployment connected to RDS can enable the
+scheduler through environment configuration without changing Java code.
+
+### Verification strategy
+
+Integration tests cover seeded transaction-ledger violations, reversal
+violations, negative USER wallet balances, global imbalance, and parity
+between the JPA invariant checker and SQL reconciliation checker.
+
+Additional tests cover execution failure handling, error-message truncation,
+connection-state restoration, named-lock release, and a controlled
+consistent-snapshot scenario.
+
+### Trade-offs and limitations
+
+- Reconciliation is detect-only; automatic financial repair is deliberately
+  excluded.
+- No alerting or reconciliation results REST endpoint is implemented.
+- Query runtime grows with ledger and transaction data size.
+- Reconciliation history retention and automated cleanup are not implemented.
+- The snapshot test demonstrates one controlled scenario, not universal
+  protection against false positives.
+- The implementation does not establish production capacity or production
+  readiness.

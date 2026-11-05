@@ -11,6 +11,8 @@ import com.walletledger.repository.OutboxEventRepository;
 import com.walletledger.entity.OutboxEvent;
 import com.walletledger.repository.WalletRepository;
 import com.walletledger.service.LedgerInvariantChecker;
+import com.walletledger.reconciliation.ReconciliationRunner;
+import com.walletledger.reconciliation.SqlReconciliationChecker;
 import com.walletledger.service.JwtService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,6 +26,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.util.List;
+import java.sql.Connection;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -36,6 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.doAnswer;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -82,6 +86,12 @@ class TransferIntegrationTest {
     @MockitoSpyBean
     private OutboxEventRepository outboxEventSpy;
 
+
+    @Autowired
+    private ReconciliationRunner reconciliationRunner;
+
+    @MockitoSpyBean
+    private SqlReconciliationChecker reconciliationCheckerSpy;
     private final JsonMapper jsonMapper = JsonMapper.builder().build();
 
     private String registerUser() throws Exception {
@@ -929,6 +939,102 @@ class TransferIntegrationTest {
             start.countDown();
             executor.shutdownNow();
         }
+        ledgerInvariantChecker.assertNoViolations();
+    }
+
+    @Test
+    void reconciliationUsesConsistentSnapshotDuringConcurrentTransfer()
+            throws Exception {
+
+        String senderId = registerUser();
+        String receiverId = registerUser();
+
+        String sourceId = createWallet(senderId);
+        String destinationId = createWallet(receiverId);
+
+        fundWallet(sourceId, 1000);
+
+        CountDownLatch snapshotEstablished = new CountDownLatch(1);
+        CountDownLatch transferCommitted = new CountDownLatch(1);
+
+        doAnswer(invocation -> {
+            Connection connection = invocation.getArgument(0);
+
+            // The first consistent read establishes the REPEATABLE READ snapshot.
+            try (var statement = connection.createStatement();
+                 var resultSet = statement.executeQuery(
+                         "SELECT COUNT(*) FROM wallets")) {
+                assertTrue(resultSet.next());
+            }
+
+            snapshotEstablished.countDown();
+
+            if (!transferCommitted.await(30, TimeUnit.SECONDS)) {
+                throw new IllegalStateException(
+                        "Timed out waiting for concurrent transfer to commit");
+            }
+
+            return invocation.callRealMethod();
+
+        }).when(reconciliationCheckerSpy).check(any(Connection.class));
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+
+        try {
+            Future<Boolean> reconciliationFuture =
+                    executor.submit(reconciliationRunner::runOnce);
+
+            assertTrue(snapshotEstablished.await(30, TimeUnit.SECONDS),
+                    "Reconciliation should establish its snapshot");
+
+            // Commit a real transfer after the snapshot has been established.
+            mockMvc.perform(post("/api/v1/transfers")
+                            .header("Authorization", bearerToken(senderId))
+                            .header("Idempotency-Key",
+                                    "snapshot-transfer-" + UUID.randomUUID())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(transferBody(sourceId, destinationId, 300)))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.status").value("COMPLETED"));
+
+            transferCommitted.countDown();
+
+            assertTrue(reconciliationFuture.get(60, TimeUnit.SECONDS),
+                    "Reconciliation should complete successfully");
+
+        } finally {
+            // Never leave the reconciliation worker blocked.
+            transferCommitted.countDown();
+            executor.shutdownNow();
+            executor.awaitTermination(10, TimeUnit.SECONDS);
+        }
+
+        String status = jdbcTemplate.queryForObject(
+                """
+                SELECT status
+                FROM reconciliation_runs
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                String.class
+        );
+
+        Integer totalViolations = jdbcTemplate.queryForObject(
+                """
+                SELECT total_violation_count
+                FROM reconciliation_runs
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                Integer.class
+        );
+
+        assertEquals("SUCCESS", status);
+        assertEquals(0, totalViolations);
+
+        assertEquals(700, balance(sourceId));
+        assertEquals(300, balance(destinationId));
+
         ledgerInvariantChecker.assertNoViolations();
     }
 }

@@ -500,3 +500,52 @@ The owner-scoped statement endpoint is:
 - Pagination is not a single database snapshot. Refresh the first page to see new activity committed after a pagination walk begins.
 
 The statement query uses the composite index `idx_ledger_wallet_cursor (wallet_id, id DESC)`. Local MySQL 8.4.11 EXPLAIN checks confirmed index use for both first-page and cursor-page queries.
+
+## Automated reconciliation (W3)
+
+WalletLedger includes a read-only SQL reconciliation process covering five financial integrity checks.
+
+### Five reconciliation checks
+
+1. **Transaction-to-ledger:** COMPLETED and REVERSED transactions must have at least two ledger entries, equal debit and credit totals, and debit total equal to transaction amount.
+2. **Reversal consistency:** Detects invalid original/reversal status, missing or duplicate completed reversals, amount mismatches, reversal chains, and mismatched opposite ledger entries.
+3. **Wallet-to-ledger:** Compares cached wallet balances with ledger-derived balances, including wallets without ledger entries.
+4. **Negative USER wallet:** Detects negative USER wallet balances. SYSTEM wallets are excluded.
+5. **Global balance:** Requires the sum of all wallet balances, including SYSTEM wallets, to equal zero.
+
+### Consistent snapshot
+
+All five checks use the same JDBC connection and REPEATABLE READ, read-only transaction. InnoDB establishes the consistent-read snapshot at the first consistent read.
+
+A controlled concurrency test verifies that a concurrent wallet update after that read does not change the snapshot observed by the remaining checks. This demonstrates the tested scenario, not universal prevention of false positives.
+
+### Scheduling configuration
+
+Scheduling is disabled by default. The default cron schedule is hourly.
+
+| Environment variable | Default |
+|---|---|
+| WALLETLEDGER_RECONCILIATION_ENABLED | false |
+| WALLETLEDGER_RECONCILIATION_CRON | 0 0 * * * * |
+| WALLETLEDGER_RECONCILIATION_LOCK_NAME | walletledger:scheduled-reconciliation |
+| WALLETLEDGER_RECONCILIATION_LOCK_TIMEOUT_SECONDS | 0 |
+
+Local Docker Compose, GitHub Actions CI, and the test profile keep scheduling disabled.
+
+For EC2 connected to Amazon RDS, scheduling can be enabled using the application environment variables above. The RDS datasource endpoint and credentials must be configured separately.
+
+### Execution outcomes
+
+- SUCCESS: checks completed without violations.
+- VIOLATIONS_FOUND: checks completed and detected violations.
+- FAILED: reconciliation execution failed.
+
+A MySQL named lock prevents overlapping scheduled runs across application instances.
+
+### Limitations
+
+- Detect-only: no automatic financial repair.
+- No alerting or reconciliation results REST endpoint.
+- Query runtime grows with ledger and transaction data size.
+- Reconciliation history retention and automated cleanup are not implemented.
+- The controlled snapshot test does not prove universal protection against false positives.

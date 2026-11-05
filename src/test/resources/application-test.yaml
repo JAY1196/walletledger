@@ -42,3 +42,6 @@ walletledger:
       capacity: 100000
       refill-tokens: 100000
       refill-duration: PT1M
+
+  reconciliation:
+    enabled: false
