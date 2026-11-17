@@ -19,3 +19,9 @@ walletledger:
       capacity: 30
       refill-tokens: 30
       refill-duration: PT1M
+
+  reconciliation:
+    enabled: false
+    cron: "0 0 * * * *"
+    lock-name: "walletledger:scheduled-reconciliation"
+    lock-timeout-seconds: 0

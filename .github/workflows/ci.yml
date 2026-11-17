@@ -18,6 +18,10 @@ jobs:
     env:
       SPRING_PROFILES_ACTIVE: test
       WALLETLEDGER_SECURITY_JWT_SECRET: dGVzdC1vbmx5LWtleS1mb3Itd2FsbGV0bGVkZ2VyLTIwMjYh
+      WALLETLEDGER_RECONCILIATION_ENABLED: 'false'
+      WALLETLEDGER_RECONCILIATION_CRON: '0 0 * * * *'
+      WALLETLEDGER_RECONCILIATION_LOCK_NAME: walletledger:scheduled-reconciliation
+      WALLETLEDGER_RECONCILIATION_LOCK_TIMEOUT_SECONDS: '0'
 
     steps:
       - name: Check out repository

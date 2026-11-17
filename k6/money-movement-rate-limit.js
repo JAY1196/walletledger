@@ -27,7 +27,7 @@ export default function () {
     const walletId = __ENV.WALLET_ID;
 
     const response = http.post(
-        `http://localhost:8080/api/v1/wallets/${walletId}/topup`,
+        `http://localhost:8081/api/v1/wallets/${walletId}/topup`,
         JSON.stringify({ amountPaise: 1 }),
         {
             headers: {

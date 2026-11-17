@@ -54,7 +54,7 @@ class DatabaseMigrationSmokeTest {
                     "SELECT COUNT(*) FROM flyway_schema_history " +
                     "WHERE success = TRUE AND version IN ('1', '2')"));
 
-            assertEquals(6, scalarInt(connection,
+            assertEquals(7, scalarInt(connection,
                     "SELECT COUNT(*) FROM information_schema.tables " +
                     "WHERE table_schema = DATABASE() " +
                     "AND table_type = 'BASE TABLE' " +
